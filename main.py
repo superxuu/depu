@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-德州扑克游戏主入口 - 使用纯sqlite3实现
+AI扑克训练主入口 - 使用纯sqlite3实现
 """
 import os
 import sys
@@ -419,6 +419,8 @@ async def websocket_game_endpoint(websocket: WebSocket):
         
         # 玩家加入后，更新准备计数
         await update_ready_count(room_id)
+        # 加一道自动开局检查：若此时所有玩家都已准备，直接触发开局
+        await check_game_start_condition(room_id)
         
         # 保持连接并处理消息
         while True:
@@ -457,6 +459,8 @@ async def websocket_game_endpoint(websocket: WebSocket):
 
             # 玩家离开后，更新准备计数
             await update_ready_count(FIXED_ROOM_ID)
+            # 离开后也检查一次是否满足开局条件（例如剩余玩家全部已准备且≥2）
+            await check_game_start_condition(FIXED_ROOM_ID)
 
             # 检查房间是否还有玩家
             remaining_players = db.execute_query(
@@ -614,6 +618,12 @@ async def handle_game_end(room_id: str, game: TexasHoldemGame):
             (player.chips, player.user_id)
         )
     
+    # 游戏结束后重置所有玩家的准备状态为未准备
+    db.execute_update(
+        "UPDATE room_players SET is_ready = 0 WHERE room_id = ?",
+        (room_id,)
+    )
+    
     # 广播游戏结束消息
     game_state = game.get_game_state()
     await manager.broadcast({
@@ -621,27 +631,42 @@ async def handle_game_end(room_id: str, game: TexasHoldemGame):
         "winner": game_state["winner"],
         "pot": game_state["pot"]
     })
+    # 同步一次权威的游戏状态（stage 应为 ended），确保前端进入准备区
+    await manager.broadcast({
+        "type": "game_state_update",
+        "data": game_state
+    })
     
     # 清理游戏实例
     if room_id in active_games:
         del active_games[room_id]
     
+    # 重置全房间玩家的准备状态，并广播准备计数，进入“等待准备”状态
+    db.execute_update(
+        "UPDATE room_players SET is_ready = 0 WHERE room_id = ?",
+        (room_id,)
+    )
+    await update_ready_count(room_id)
+    
     print(f"房间 {room_id} 的游戏已结束")
+    
+    # 游戏结束后检查是否可以开始新游戏（如果玩家已经准备好）
+    await check_game_start_condition(room_id)
 
 async def check_game_start_condition(room_id: str):
-    """检查是否可以开始游戏（仅按在线玩家计算）"""
+    """检查是否可以开始游戏（仅按当前连接玩家计算）"""
     # 读取房间玩家的准备状态
     players_data = db.execute_query(
         "SELECT user_id, is_ready FROM room_players WHERE room_id = ?",
         (room_id,)
     )
     
-    # 仅统计当前在线的玩家
+    # 仅统计当前连接的玩家
     online_players = [p for p in players_data if p["user_id"] in manager.active_connections]
     online_total = len(online_players)
     ready_online = sum(1 for p in online_players if p["is_ready"])
     
-    # 至少2名在线玩家，且在线玩家全部准备；且当前房间未有活跃游戏
+    # 至少2名玩家，且玩家全部准备；且当前房间未有活跃游戏
     if online_total >= 2 and ready_online == online_total and room_id not in active_games:
         await start_game_in_room(room_id)
 
@@ -681,7 +706,7 @@ async def start_game_in_room(room_id: str):
             (room_id,)
         )
         
-        # 仅添加“在线且已准备”的玩家进入本手牌
+        # 仅添加“已连接且已准备”的玩家进入本手牌
         eligible_players = [
             p for p in room_players_data
             if p["user_id"] in manager.active_connections and p.get("is_ready")
@@ -724,7 +749,7 @@ async def start_game_in_room(room_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    print("德州扑克游戏启动中...")
+    print("AI扑克训练启动中...")
     print(f"访问地址: http://{settings.HOST}:{settings.PORT}")
     print(f"API文档: http://{settings.HOST}:{settings.PORT}/docs")
     

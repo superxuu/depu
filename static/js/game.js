@@ -154,7 +154,20 @@ class PokerGame {
     
     handleGameStateUpdate(gameState) {
         this.gameState = gameState;
-        this.renderGameState();
+        
+        // 检查游戏阶段，如果是结束阶段，不调用renderGameState以避免覆盖准备按钮
+        const stage = this.normalizeStage(gameState.stage);
+        if (stage !== 'ended') {
+            this.renderGameState();
+        } else {
+            // 游戏结束阶段，只更新必要的UI元素，并强制显示准备区
+            this.renderCommunityCards();
+            this.renderPlayers();
+            this.renderPot();
+            this.updateGameStage(stage);
+            // 强制切换到准备区，避免因消息顺序导致按钮不出现
+            this.toggleGameActions(false);
+        }
     }
     
     handleActionConfirmation(data) {
@@ -239,12 +252,46 @@ class PokerGame {
     }
     
     handleGameEnded(data) {
+        console.log('收到game_ended消息:', data);
+        
         if (data.winner && data.winner.user_id === this.user.user_id) {
             this.showToast('恭喜你获胜！', 'success');
         } else if (data.winner) {
             this.showToast(`${data.winner.nickname} 获胜！`, 'info');
         }
         this.updateGameStage('ended');
+        
+        // 强制显示准备按钮区域，隐藏游戏操作区域
+        const readySection = document.getElementById('ready-section');
+        const gameActionSection = document.getElementById('game-action-section');
+        
+        console.log('准备按钮区域元素:', readySection);
+        console.log('游戏操作区域元素:', gameActionSection);
+        
+        if (readySection) {
+            readySection.style.display = 'flex';
+            console.log('准备按钮区域已显示');
+        } else {
+            console.error('找不到准备按钮区域元素');
+        }
+        
+        if (gameActionSection) {
+            gameActionSection.style.display = 'none';
+            console.log('游戏操作区域已隐藏');
+        } else {
+            console.error('找不到游戏操作区域元素');
+        }
+        
+        // 重置当前玩家的准备状态为未准备
+        if (this.user) {
+            this.updateReadyUI(false);
+        }
+        
+        // 游戏结束后，广播准备状态更新，确保所有玩家看到准备按钮
+        this.sendMessage({
+            type: 'player_ready',
+            is_ready: false
+        });
     }
     
     handlePong() {
@@ -417,9 +464,24 @@ class PokerGame {
         if (!this.gameState) return;
         
         const stage = this.normalizeStage(this.gameState.stage);
+        
         // 只在非 waiting/ended 阶段显示操作区
-        const gameInProgress = stage && !['ended', 'waiting'].includes(stage);
-        this.toggleGameActions(gameInProgress);
+        // 如果游戏已经结束（ended阶段），保持准备按钮显示
+        if (stage === 'ended') {
+            // 游戏结束阶段，确保准备按钮显示，游戏操作区域隐藏
+            const readySection = document.getElementById('ready-section');
+            const gameActionSection = document.getElementById('game-action-section');
+            
+            if (readySection) {
+                readySection.style.display = 'flex';
+            }
+            if (gameActionSection) {
+                gameActionSection.style.display = 'none';
+            }
+        } else {
+            const gameInProgress = stage && !['waiting'].includes(stage);
+            this.toggleGameActions(gameInProgress);
+        }
 
         this.renderCommunityCards();
         this.renderPlayers();
@@ -563,9 +625,23 @@ class PokerGame {
 
         const callAmount = Math.max(0, this.calculateCallAmount() || 0);
         const callBtn = document.getElementById('call-btn');
+        const checkBtn = document.getElementById('check-btn');
         if (callBtn) {
-            callBtn.textContent = callAmount > 0 ? `跟注 ${callAmount}` : '过牌';
-            callBtn.disabled = callAmount > 0 && Number(currentPlayer.chips || 0) < callAmount;
+            // 始终显示“跟注”按钮，避免布局跳动
+            callBtn.style.display = 'inline-block';
+            if (callAmount > 0) {
+                // 需要跟注：显示金额
+                callBtn.textContent = `跟注 ${callAmount}`;
+                callBtn.disabled = Number(currentPlayer.chips || 0) < callAmount;
+            } else {
+                // 无需跟注：保持按钮但置灰，文案固定为“跟注”
+                callBtn.textContent = '跟注';
+                callBtn.disabled = true;
+            }
+        }
+        // “过牌”按钮始终可用
+        if (checkBtn) {
+            checkBtn.disabled = false;
         }
         
         const raiseBtn = document.getElementById('raise-btn');
@@ -575,6 +651,7 @@ class PokerGame {
             raiseInput.min = String(minRaise);
             // 保护：无 chips 时设置为0
             raiseInput.max = String(Number(currentPlayer.chips || 0));
+            // 不能加注时置灰，但不隐藏
             raiseBtn.disabled = Number(currentPlayer.chips || 0) < minRaise;
         }
     }
@@ -733,12 +810,14 @@ class PokerGame {
     }
     
     disableActionButtons() {
-        const buttons = document.querySelectorAll('.action-btn');
+        // 只禁用“游戏操作区”的按钮，避免误伤准备区按钮
+        const buttons = document.querySelectorAll('#game-action-section .action-btn');
         buttons.forEach(btn => btn.disabled = true);
     }
     
     enableActionButtons() {
-        const buttons = document.querySelectorAll('.action-btn');
+        // 仅启用“游戏操作区”的按钮
+        const buttons = document.querySelectorAll('#game-action-section .action-btn');
         buttons.forEach(btn => btn.disabled = false);
     }
     

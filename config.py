@@ -3,12 +3,12 @@ from typing import List
 
 class Settings:
     # 项目配置
-    PROJECT_NAME = "德州扑克在线游戏"
+    PROJECT_NAME = "AI扑克训练"
     VERSION = "1.0.0"
     DEBUG = True
     
     # 邀请码配置
-    INVITE_CODES = ["POKER123", "TEXAS888", "GAME456"]
+    INVITE_CODES = ["POKER123", "TEXAS888", "GAME456", "1"]
     
     # 游戏配置
     DEFAULT_CHIPS = 1000

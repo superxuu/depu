@@ -7,7 +7,7 @@
 
 <div class="game-container">
     <div class="game-header">
-        <h2>德州扑克房间: {{ room.room_name }}</h2>
+        <h2>AI扑克训练房间: {{ room.room_name }}</h2>
         <div class="game-info">
             <span id="game-stage">等待开始</span>
             <span id="pot-size">底池: 0</span>
@@ -44,7 +44,7 @@
                         <button id="ready-btn" class="action-btn btn-success">准备</button>
                         <button id="unready-btn" class="action-btn btn-secondary" style="display: none;">取消准备</button>
                         <!-- 测试按钮：即使其他玩家没准备也能查看个人牌 -->
-                        <button id="test-cards-btn" class="action-btn btn-info" data-action="test-cards">测试牌面</button>
+                        
                     </div>
                     
                     <!-- 游戏操作按钮（游戏开始时显示） -->

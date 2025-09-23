@@ -320,10 +320,12 @@ class TexasHoldemGame:
             return False
         # 如果只剩一个玩家，直接获胜
         if len(active_players) == 1:
-            active_players[0].chips += self.pot
-            self.winner = active_players[0]
-            # 标记胜者
-            self.winner.win = True
+            winner_player = active_players[0]
+            winner_player.chips += self.pot
+            winner_player.win = True
+            self.winner = winner_player
+            # 直接结束本手牌
+            self.stage = GameStage.ENDED
             return True
         
         # 评估所有玩家的手牌
@@ -352,9 +354,12 @@ class TexasHoldemGame:
         
         # 分配底池
         if len(winners) == 1:
-            winners[0]["player"].chips += self.pot
-            self.winner = winners[0]["player"]
-            self.winner.win = True
+            winner_player = winners[0]["player"]
+            winner_player.chips += self.pot
+            winner_player.win = True
+            self.winner = winner_player
+            # 直接结束本手牌
+            self.stage = GameStage.ENDED
         else:
             # 平局，平均分配并处理余数
             share = self.pot // len(winners)
@@ -365,6 +370,8 @@ class TexasHoldemGame:
             # 标记所有平分胜者
             for w in winners:
                 w["player"].win = True
+            # 平分也结束本手牌
+            self.stage = GameStage.ENDED
         
         return True
     
