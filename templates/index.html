@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <h2>欢迎来到德州扑克</h2>
+        <p class="auth-description">请输入邀请码开始游戏</p>
+        
+        <form id="inviteForm" class="auth-form">
+            <div class="form-group">
+                <label for="inviteCode">邀请码</label>
+                <input type="text" id="inviteCode" name="invite_code" required 
+                       placeholder="请输入邀请码" autocomplete="off">
+            </div>
+            
+            <button type="submit" class="btn btn-primary">验证邀请码</button>
+        </form>
+        
+        <div id="nicknameSection" class="hidden">
+            <form id="nicknameForm" class="auth-form" action="/create-user" method="POST">
+                <input type="hidden" id="verifiedInviteCode" name="invite_code">
+                
+                <div class="form-group">
+                    <label for="nickname">设置昵称</label>
+                    <input type="text" id="nickname" name="nickname" required 
+                           placeholder="请输入您的昵称" autocomplete="off" maxlength="20">
+                    <small>昵称长度2-20个字符</small>
+                </div>
+                
+                <button type="submit" class="btn btn-success">加入房间</button>
+            </form>
+        </div>
+        
+        <div id="message" class="message hidden"></div>
+    </div>
+</div>
+
+<script>
+document.getElementById('inviteForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const inviteCode = formData.get('invite_code').toUpperCase().trim();
+    
+    try {
+        const response = await fetch('/verify-invite', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            document.getElementById('verifiedInviteCode').value = inviteCode;
+            document.getElementById('inviteForm').classList.add('hidden');
+            document.getElementById('nicknameSection').classList.remove('hidden');
+            showMessage('邀请码验证成功！请设置您的昵称', 'success');
+        } else {
+            const error = await response.json();
+            showMessage(error.detail || '验证失败', 'error');
+        }
+    } catch (error) {
+        showMessage('网络错误，请重试', 'error');
+    }
+});
+
+document.getElementById('nicknameForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    
+    const nickname = document.getElementById('nickname').value.trim();
+    
+    if (nickname.length < 2 || nickname.length > 20) {
+        showMessage('昵称长度必须在2-20个字符之间', 'error');
+        return;
+    }
+    
+    // 使用传统表单提交方式，让浏览器自动处理重定向和cookie
+    const form = document.getElementById('nicknameForm');
+    form.submit();
+});
+
+function showMessage(text, type) {
+    const messageEl = document.getElementById('message');
+    messageEl.textContent = text;
+    messageEl.className = `message ${type}`;
+    messageEl.classList.remove('hidden');
+    
+    setTimeout(() => {
+        messageEl.classList.add('hidden');
+    }, 3000);
+}
+</script>
+{% endblock %}

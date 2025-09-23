@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block content %}
+<script id="user-data" type="application/json">
+    {{ user|tojson }}
+</script>
+
+<div class="game-container">
+    <div class="game-header">
+        <h2>德州扑克房间: {{ room.room_name }}</h2>
+        <div class="game-info">
+            <span id="game-stage">等待开始</span>
+            <span id="pot-size">底池: 0</span>
+        </div>
+    </div>
+
+    <div class="game-content">
+        <!-- 主牌桌区域 -->
+        <div class="main-table-section">
+            <!-- 椭圆牌桌 -->
+            <div class="poker-table-container">
+                <div class="poker-table">
+                    <!-- 公共牌显示在牌桌中间偏上位置 -->
+                    <div id="community-cards-center" class="community-cards-center"></div>
+                    <!-- 个人牌显示在牌桌下半侧 -->
+                    <div id="player-hole-cards" class="player-hole-cards"></div>
+                </div>
+                <!-- 玩家围绕牌桌（移到牌桌容器外部） -->
+                <div id="players-container" class="players-around-table"></div>
+            </div>
+            
+            <!-- 游戏信息和控制区域 -->
+            <div class="game-controls-section">
+                <div class="game-status">
+                    <span id="game-stage">等待开始</span>
+                    <span id="pot-size">底池: 0</span>
+                    <span id="ready-count">准备: 0/0</span>
+                </div>
+                
+                <!-- 准备状态和操作按钮 -->
+                <div class="action-buttons">
+                    <!-- 准备按钮（游戏未开始时显示） -->
+                    <div id="ready-section" class="ready-section">
+                        <button id="ready-btn" class="action-btn btn-success">准备</button>
+                        <button id="unready-btn" class="action-btn btn-secondary" style="display: none;">取消准备</button>
+                        <!-- 测试按钮：即使其他玩家没准备也能查看个人牌 -->
+                        <button id="test-cards-btn" class="action-btn btn-info" data-action="test-cards">测试牌面</button>
+                    </div>
+                    
+                    <!-- 游戏操作按钮（游戏开始时显示） -->
+                    <div id="game-action-section" class="game-action-section" style="display: none;">
+                        <button id="fold-btn" class="action-btn btn-danger">弃牌</button>
+                        <button id="check-btn" class="action-btn btn-secondary">过牌</button>
+                        <button id="call-btn" class="action-btn btn-primary">跟注</button>
+                        
+                        <div class="raise-section">
+                            <input type="number" id="raise-amount" placeholder="加注金额" min="0">
+                            <button id="raise-btn" class="action-btn btn-warning">加注</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        
+    </div>
+</div>
+
+<!-- 游戏状态指示器 -->
+<div id="connection-status" class="connection-status hidden">
+    <div class="status-indicator"></div>
+    <span>连接状态</span>
+</div>
+
+<!-- Toast 容器 -->
+<div id="toast-container" class="toast-container"></div>
+
+<script src="{{ url_for('static', path='js/game.js') }}?v=1.2"></script>
+<script>
+    // 极简认证 - 只使用cookie（符合技术方案）
+    console.log('页面加载，检查cookie认证状态');
+    console.log('当前cookie:', document.cookie);
+    
+    // 简单的cookie检查
+    const sessionToken = document.cookie.match(/session_token=([^;]+)/)?.[1];
+    console.log('从cookie获取的sessionToken:', sessionToken);
+    
+    if (!sessionToken) {
+        console.warn('未找到session_token cookie，重定向到首页');
+        // 添加延迟以确保cookie有足够时间设置
+        setTimeout(() => {
+            const retryToken = document.cookie.match(/session_token=([^;]+)/)?.[1];
+            if (!retryToken) {
+                window.location.href = '/';
+            }
+        }, 100);
+    }
+</script>
+{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/game.css') }}?v=1.2">
+{% endblock %}

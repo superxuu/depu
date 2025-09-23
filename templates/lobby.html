@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="lobby-container">
+    <div class="lobby-header">
+        <h2>游戏大厅</h2>
+        <button id="createRoomBtn" class="btn btn-primary">创建房间</button>
+    </div>
+    
+    <div class="rooms-section">
+        <h3>可用房间</h3>
+        <div id="roomsList" class="rooms-list">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+    
+    <div class="create-room-modal hidden">
+        <div class="modal-content">
+            <h3>创建新房间</h3>
+            <form id="createRoomForm">
+                <div class="form-group">
+                    <label for="roomName">房间名称</label>
+                    <input type="text" id="roomName" name="room_name" required 
+                           placeholder="请输入房间名称" maxlength="50">
+                </div>
+                
+                <div class="form-group">
+                    <label for="maxPlayers">最大玩家数</label>
+                    <select id="maxPlayers" name="max_players">
+                        <option value="2">2人</option>
+                        <option value="3">3人</option>
+                        <option value="4">4人</option>
+                        <option value="5">5人</option>
+                        <option value="6" selected>6人</option>
+                        <option value="7">7人</option>
+                        <option value="8">8人</option>
+                        <option value="9">9人</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="minBet">最小下注</label>
+                    <input type="number" id="minBet" name="min_bet" value="10" min="1" max="1000">
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">创建房间</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadRooms();
+    
+    document.getElementById('createRoomBtn').addEventListener('click', function() {
+        document.querySelector('.create-room-modal').classList.remove('hidden');
+    });
+    
+    document.getElementById('createRoomForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const roomData = {
+            room_name: formData.get('room_name'),
+            max_players: parseInt(formData.get('max_players')),
+            min_bet: parseInt(formData.get('min_bet'))
+        };
+        
+        try {
+            const response = await fetch('/api/rooms', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(roomData)
+            });
+            
+            if (response.ok) {
+                const room = await response.json();
+                window.location.href = "/room";
+            } else {
+                alert('创建房间失败');
+            }
+        } catch (error) {
+            alert('网络错误');
+        }
+    });
+});
+
+async function loadRooms() {
+    try {
+        const response = await fetch('/api/rooms');
+        const rooms = await response.json();
+        
+        const roomsList = document.getElementById('roomsList');
+        if (rooms.length === 0) {
+            roomsList.innerHTML = '<div class="no-rooms">暂无可用房间</div>';
+            return;
+        }
+        
+        roomsList.innerHTML = rooms.map(room => `
+            <div class="room-card">
+                <div class="room-info">
+                    <h4>${room.room_name}</h4>
+                    <p>玩家: ${room.current_players || 0}/${room.max_players}</p>
+                    <p>最小下注: ${room.min_bet}</p>
+                    <p>状态: ${getStatusText(room.status)}</p>
+                </div>
+                <button class="btn btn-primary" onclick="joinRoom('${room.room_id}')">
+                    ${room.status === 'waiting' ? '加入房间' : '观战'}
+                </button>
+            </div>
+        `).join('');
+    } catch (error) {
+        document.getElementById('roomsList').innerHTML = '<div class="error">加载失败</div>';
+    }
+}
+
+function getStatusText(status) {
+    const statusMap = {
+        'waiting': '等待中',
+        'playing': '游戏中',
+        'finished': '已结束'
+    };
+    return statusMap[status] || status;
+}
+
+function joinRoom(roomId) {
+    window.location.href = "/room";
+}
+
+function closeModal() {
+    document.querySelector('.create-room-modal').classList.add('hidden');
+}
+
+// 点击模态框外部关闭
+document.querySelector('.create-room-modal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeModal();
+    }
+});
+</script>
+{% endblock %}
