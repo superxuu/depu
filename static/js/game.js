@@ -231,17 +231,20 @@ class PokerGame {
     
     
     handlePlayerJoined(data) {
-        // 只显示提示，不立即重绘。等待 game_state_update 统一更新界面，避免时序竞争。
+        // 提示并主动刷新玩家列表，避免依赖后端额外广播
         this.showToast(`${data.nickname} 加入了游戏`, 'info');
+        setTimeout(() => this.updateRoomPlayers(), 150);
     }
     
     handlePlayerLeft(data) {
-        // 只显示提示，不立即重绘。等待 game_state_update 统一更新界面，避免时序竞争。
+        // 提示并主动刷新玩家列表
         this.showToast(`玩家 ${data.nickname || data.user_id} 离开了游戏`, 'info');
+        setTimeout(() => this.updateRoomPlayers(), 150);
     }
     
     handlePlayerDisconnected(data) {
         this.showToast(`玩家 ${data.user_id} 断开连接`, 'warning');
+        setTimeout(() => this.updateRoomPlayers(), 150);
     }
     
     handleGameStarted() {
