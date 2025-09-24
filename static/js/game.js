@@ -1232,6 +1232,8 @@ ${listText}`, players[0].user_id);
         });
         window.addEventListener('beforeunload', sendLeave);
 
+
+
     }
     
     disableActionButtons() {
@@ -1532,13 +1534,27 @@ ${listText}`, players[0].user_id);
 
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
 // 初始化游戏
 document.addEventListener('DOMContentLoaded', function() {
+
     // 从页面模板中获取用户数据
     const userDataElement = document.getElementById('user-data');
     if (userDataElement) {
         const userData = JSON.parse(userDataElement.textContent);
         window.pokerGame = new PokerGame(userData);
+        // 保持原尺寸显示（不缩放）
     } else {
         window.location.href = '/';
     }

@@ -18,15 +18,17 @@
         <!-- 主牌桌区域 -->
         <div class="main-table-section">
             <!-- 椭圆牌桌 -->
-            <div class="poker-table-container">
-                <div class="poker-table">
-                    <!-- 公共牌显示在牌桌中间偏上位置 -->
-                    <div id="community-cards-center" class="community-cards-center"></div>
-                    <!-- 个人牌显示在牌桌下半侧 -->
-                    <div id="player-hole-cards" class="player-hole-cards"></div>
+            <div id="table-stage">
+                <div class="poker-table-container">
+                    <div class="poker-table">
+                        <!-- 公共牌显示在牌桌中间偏上位置 -->
+                        <div id="community-cards-center" class="community-cards-center"></div>
+                        <!-- 个人牌显示在牌桌下半侧 -->
+                        <div id="player-hole-cards" class="player-hole-cards"></div>
+                    </div>
+                    <!-- 玩家围绕牌桌（移到牌桌容器外部） -->
+                    <div id="players-container" class="players-around-table"></div>
                 </div>
-                <!-- 玩家围绕牌桌（移到牌桌容器外部） -->
-                <div id="players-container" class="players-around-table"></div>
             </div>
             
             <!-- 游戏信息和控制区域 -->
@@ -75,7 +77,19 @@
 <!-- Toast 容器 -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="{{ url_for('static', path='js/game.js') }}?v=1.3"></script>
+<!-- 摊牌浮层结构：显示时给 #showdown-overlay 添加 active 类 -->
+<div class="showdown-overlay" id="showdown-overlay">
+  <div class="showdown-dialog">
+    <div class="showdown-title">摊牌</div>
+    <div class="showdown-content">请确认是否摊牌</div>
+    <div class="showdown-actions">
+      <button class="showdown-btn showdown-btn-primary" id="showdown-confirm">确认摊牌</button>
+      <button class="showdown-btn showdown-btn-secondary" id="showdown-cancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', path='js/game.js') }}?v=1.5"></script>
 <script>
     // 极简认证 - 只使用cookie（符合技术方案）
     console.log('页面加载，检查cookie认证状态');
@@ -99,5 +113,5 @@
 {% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/game.css') }}?v=1.3">
+<link rel="stylesheet" href="{{ url_for('static', path='css/game.css') }}?v=1.4">
 {% endblock %}
