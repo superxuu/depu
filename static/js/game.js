@@ -168,6 +168,10 @@ class PokerGame {
             // 强制切换到准备区，避免因消息顺序导致按钮不出现
             this.toggleGameActions(false);
         }
+        // 摊牌/结束阶段渲染明牌
+        if (stage === 'showdown' || stage === 'ended') {
+            this.renderShowdownReveal(this.gameState);
+        }
     }
     
     handleActionConfirmation(data) {
@@ -491,6 +495,10 @@ class PokerGame {
         this.renderPot();
         this.renderActionButtons();
         this.updateGameStage(stage);
+        // 摊牌阶段渲染明牌
+        if (stage === 'showdown' || stage === 'ended') {
+            this.renderShowdownReveal(this.gameState);
+        }
     }
     
     renderCommunityCards() {
@@ -791,6 +799,111 @@ class PokerGame {
             'spades': '♠'
         };
         return symbols[suit] || suit[0].toUpperCase();
+    }
+
+    // 摊牌阶段展示所有仍在局内玩家的手牌
+    renderShowdownReveal(state) {
+        if (!state || !Array.isArray(state.showdown_reveal) || state.showdown_reveal.length === 0) return;
+        // 容器：优先使用现有ID，否则创建一个固定位置的overlay
+        let container = document.getElementById('showdown-reveal');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'showdown-reveal';
+            container.style.position = 'fixed';
+            container.style.bottom = '16px';
+            container.style.left = '50%';
+            container.style.transform = 'translateX(-50%)';
+            container.style.background = 'rgba(0,0,0,0.7)';
+            container.style.color = '#fff';
+            container.style.padding = '8px 12px';
+            container.style.borderRadius = '8px';
+            container.style.zIndex = '9999';
+            container.style.maxWidth = '90%';
+            container.style.fontSize = '14px';
+            container.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+            document.body.appendChild(container);
+        }
+        // 清空并渲染
+        container.innerHTML = '';
+        // 加入右上角关闭按钮
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'showdown-close';
+        closeBtn.textContent = '×';
+        closeBtn.style.position = 'absolute';
+        closeBtn.style.top = '6px';
+        closeBtn.style.right = '8px';
+        closeBtn.style.background = 'transparent';
+        closeBtn.style.color = '#fff';
+        closeBtn.style.border = 'none';
+        closeBtn.style.cursor = 'pointer';
+        closeBtn.style.fontSize = '18px';
+        closeBtn.style.lineHeight = '18px';
+        closeBtn.style.padding = '0';
+        closeBtn.title = '关闭';
+        closeBtn.addEventListener('click', () => {
+            container.style.display = 'none';
+        });
+        container.appendChild(closeBtn);
+        const title = document.createElement('div');
+        title.style.fontWeight = 'bold';
+        title.style.marginBottom = '6px';
+        title.textContent = `摊牌：公开仍在局内玩家的手牌`;
+        container.appendChild(title)
+
+        const list = document.createElement('div');
+        list.style.display = 'flex';
+        list.style.flexWrap = 'wrap';
+        list.style.gap = '8px';
+
+        state.showdown_reveal.forEach(p => {
+            const item = document.createElement('div');
+            item.style.background = 'rgba(255,255,255,0.1)';
+            item.style.border = '1px solid rgba(255,255,255,0.2)';
+            item.style.borderRadius = '6px';
+            item.style.padding = '6px 8px';
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '6px';
+
+            const info = document.createElement('div');
+            info.textContent = `${p.nickname}（座位${p.position}）`;
+            info.style.marginRight = '6px';
+            item.appendChild(info);
+
+            const cardsWrap = document.createElement('div');
+            cardsWrap.style.display = 'flex';
+            cardsWrap.style.gap = '4px';
+            (p.hole_cards || []).forEach(card => {
+                const cardEl = document.createElement('div');
+                cardEl.className = 'card';
+                cardEl.style.width = '28px';
+                cardEl.style.height = '40px';
+                cardEl.style.display = 'flex';
+                cardEl.style.flexDirection = 'column';
+                cardEl.style.alignItems = 'center';
+                cardEl.style.justifyContent = 'center';
+                cardEl.style.background = '#fff';
+                cardEl.style.color = '#000';
+                cardEl.style.borderRadius = '4px';
+                cardEl.style.fontSize = '12px';
+                cardEl.style.boxShadow = '0 1px 3px rgba(0,0,0,0.25)';
+                cardEl.innerHTML = `
+                    <div>${card.rank}</div>
+                    <div>${this.getSuitSymbol(card.suit)}</div>
+                `;
+                // 按花色设置显式颜色，确保跨浏览器显示一致
+                const isRedSuit = (card.suit === 'hearts' || card.suit === 'diamonds');
+                cardEl.style.color = isRedSuit ? '#d32f2f' : '#000'; // 红桃/方块红色，其余黑色
+                cardEl.style.border = isRedSuit ? '1px solid rgba(211,47,47,0.6)' : '1px solid rgba(0,0,0,0.2)';
+                cardEl.setAttribute('data-suit', card.suit);
+                cardsWrap.appendChild(cardEl);
+            });
+            item.appendChild(cardsWrap);
+
+            list.appendChild(item);
+        });
+
+        container.appendChild(list);
     }
     
     setupEventListeners() {
