@@ -803,6 +803,7 @@ class PokerGame {
             console.log('[UI] 点击刷新房间玩家');
             if (btn) btn.disabled = true;
             try {
+                this.gameState = null;
                 await this.updateRoomPlayers();
                 this.showToast('房间玩家已刷新', 'info');
             } catch (e) {
@@ -820,6 +821,7 @@ class PokerGame {
                 console.log('[UI] 代理点击刷新房间玩家');
                 try {
                     target.disabled = true;
+                    this.gameState = null;
                     await this.updateRoomPlayers();
                     this.showToast('房间玩家已刷新', 'info');
                 } catch (err) {
