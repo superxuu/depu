@@ -538,7 +538,7 @@ class PokerGame {
                 const response = await fetch('/api/players');
                 if (response.ok) {
                     const data = await response.json();
-                    players = data.players || [];
+                    players = (data.players || []).filter(p => p && p.connected === true);
                 } else {
                     console.error('API 获取玩家列表失败');
                     return;
