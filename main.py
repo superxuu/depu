@@ -22,13 +22,21 @@ from game_logic.game_engine import TexasHoldemGame, GameStage
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
+        # 最近心跳时间戳（秒）
+        self.last_seen: Dict[str, float] = {}
     
     async def connect(self, user_id: str, websocket: WebSocket):
         self.active_connections[user_id] = websocket
+        # 记录连接建立时的心跳时间
+        import time
+        self.last_seen[user_id] = time.time()
     
     def disconnect(self, user_id: str):
         if user_id in self.active_connections:
             del self.active_connections[user_id]
+        # 同步移除心跳记录
+        if user_id in getattr(self, "last_seen", {}):
+            del self.last_seen[user_id]
     
     async def send_personal_message(self, message: Dict[str, Any], user_id: str):
         if user_id in self.active_connections:
@@ -300,6 +308,44 @@ async def get_players(request: Request):
         "total_players": len(players_list)
     }
 
+@app.post("/api/cleanup-stale")
+async def cleanup_stale_connections():
+    """
+    心跳探测并清理失效连接：
+    - 尝试向每个连接发送一次探测消息
+    - 发送失败或超过阈值未心跳则视为断开：移除 active_connections，删除房间记录，广播 player_left
+    - 更新准备人数计数
+    """
+    room_id = FIXED_ROOM_ID
+    cleaned = []
+    import time
+    now = time.time()
+    TIMEOUT = 90  # 超过该秒数未心跳视为僵尸连接
+    # 使用 list() 拷贝，避免迭代过程中修改字典
+    for user_id, ws in list(manager.active_connections.items()):
+        probe_failed = False
+        try:
+            await ws.send_json({"type": "heartbeat_probe"})
+        except Exception:
+            probe_failed = True
+        last = getattr(manager, "last_seen", {}).get(user_id, 0.0)
+        timed_out = (now - last) > TIMEOUT
+        if probe_failed or timed_out:
+            # 清理失效或超时连接
+            manager.disconnect(user_id)
+            db.execute_update(
+                "DELETE FROM room_players WHERE room_id = ? AND user_id = ?",
+                (room_id, user_id)
+            )
+            await manager.broadcast({
+                "type": "player_left",
+                "user_id": user_id
+            })
+            cleaned.append(user_id)
+    # 刷新准备计数
+    await update_ready_count(room_id)
+    return {"cleaned": cleaned, "count": len(cleaned)}
+
 @app.post("/api/rooms")
 async def create_room_endpoint(request: Request):
     """创建新房间"""
@@ -430,6 +476,9 @@ async def websocket_game_endpoint(websocket: WebSocket):
             # 处理不同类型的消息
             if data.get("type") == "ping":
                 await manager.send_personal_message({"type": "pong"}, user["user_id"])
+                # 更新最近心跳时间
+                import time
+                manager.last_seen[user["user_id"]] = time.time()
             elif data.get("type") == "game_action":
                 await handle_game_action(user, data, room_id)
             elif data.get("type") == "player_ready":
