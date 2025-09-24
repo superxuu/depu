@@ -289,6 +289,9 @@ class TexasHoldemGame:
         result = self._process_action(player, action, amount)
         if result["success"]:
             self.last_action_time = time.time()
+            # 若即时结算已结束整手牌，则不再推进或轮转
+            if self.stage == GameStage.ENDED:
+                return result
             # 回合结束判定：若应结束则直接进入下一阶段，否则轮到下一位
             if self._should_advance_stage():
                 self.next_stage()
@@ -301,14 +304,20 @@ class TexasHoldemGame:
         """处理具体操作"""
         if action == "fold":
             player.fold()
+            # 检查是否仅剩一人活跃，若是则立刻结算
+            self._check_instant_win()
+            # 若已结束，清理当前行动位，避免继续轮转
+            if self.stage == GameStage.ENDED:
+                self.current_player_position = None
             return {"success": True, "message": "弃牌成功"}
         
         elif action == "check":
             if player.current_bet < self.current_bet:
                 return {"success": False, "message": "必须跟注或加注"}
             player.check()
-            # 记录行动
-            self.acted_positions.add(player.position)
+            # 记录行动（仅仍需表态者）
+            if not player.is_all_in and not player.is_folded:
+                self.acted_positions.add(player.position)
             # 过牌后若只剩一人未弃牌，立即结算
             self._check_instant_win()
             return {"success": True, "message": "过牌成功"}
@@ -323,8 +332,6 @@ class TexasHoldemGame:
                 actual_amount = player.chips
                 player.bet(actual_amount)
                 self.pot += actual_amount
-                # 记录行动
-                self.acted_positions.add(player.position)
                 # 全下后若只剩一人未弃牌，立即结算
                 self._check_instant_win()
                 return {"success": True, "message": "全下成功", "all_in": True}
@@ -332,8 +339,9 @@ class TexasHoldemGame:
             # 注意：Player.call 期望传入的是“台面总注”，内部会以该值与当前下注差额计算
             player.call(self.current_bet)
             self.pot += call_amount
-            # 记录行动
-            self.acted_positions.add(player.position)
+            # 记录行动（仅仍需表态者）
+            if not player.is_all_in and not player.is_folded:
+                self.acted_positions.add(player.position)
             # 实时更新边池概览
             self._update_side_pots_snapshot()
             # 跟注后若只剩一人未弃牌，立即结算
