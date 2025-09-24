@@ -276,9 +276,9 @@ async def get_players(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="未登录")
     
-    # 从数据库获取固定房间的玩家信息
+    # 从数据库获取固定房间的玩家信息（包含准备状态）
     players = db.execute_query(
-        "SELECT user_id, nickname, chips FROM room_players WHERE room_id = ?",
+        "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
         (FIXED_ROOM_ID,)
     )
     print(f"DEBUG: 从数据库获取的玩家: {players}")
@@ -288,6 +288,7 @@ async def get_players(request: Request):
             "user_id": player["user_id"],
             "nickname": player["nickname"],
             "chips": player["chips"],
+            "is_ready": player.get("is_ready", 0),
             "connected": player["user_id"] in manager.active_connections
         }
         for player in players
