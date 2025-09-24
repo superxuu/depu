@@ -252,6 +252,8 @@ class PokerGame {
     }
     
     handleGameStarted() {
+        const ov = document.getElementById('showdown-reveal');
+        if (ov) ov.remove();
         this.showToast('游戏开始！', 'success');
         this.updateGameStage('preflop');
         // 游戏开始，切换到游戏操作按钮
@@ -326,6 +328,8 @@ class PokerGame {
     }
     
     setReady() {
+        const ov = document.getElementById('showdown-reveal');
+        if (ov) ov.remove();
         this.sendMessage({
             type: 'player_ready',
             is_ready: true
@@ -333,6 +337,8 @@ class PokerGame {
     }
     
     setUnready() {
+        const ov = document.getElementById('showdown-reveal');
+        if (ov) ov.remove();
         this.sendMessage({
             type: 'player_ready',
             is_ready: false
@@ -803,7 +809,7 @@ class PokerGame {
 
     // 摊牌阶段展示所有仍在局内玩家的手牌
     renderShowdownReveal(state) {
-        if (!state || !Array.isArray(state.showdown_reveal) || state.showdown_reveal.length === 0) return;
+        if (!state) return;
         // 容器：优先使用现有ID，否则创建一个固定位置的overlay
         let container = document.getElementById('showdown-reveal');
         if (!container) {
@@ -823,6 +829,10 @@ class PokerGame {
             container.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
             document.body.appendChild(container);
         }
+        // 确保每次渲染时显示出来（即便之前被关闭/隐藏）
+        container.style.display = 'block';
+        // 为右上角关闭按钮预留空间，避免按钮压近内容
+        container.style.paddingRight = '28px';
         // 清空并渲染
         container.innerHTML = '';
         // 加入右上角关闭按钮
@@ -847,15 +857,47 @@ class PokerGame {
         const title = document.createElement('div');
         title.style.fontWeight = 'bold';
         title.style.marginBottom = '6px';
-        title.textContent = `摊牌：公开仍在局内玩家的手牌`;
-        container.appendChild(title)
+        // 为右上角关闭按钮预留标题右侧空间
+        title.style.marginRight = '28px';
+        title.textContent = `摊牌：公开局内或自愿亮牌的手牌`;
+        container.appendChild(title);
+
+        // 标题下方的操作区域，避免与右上角“×”靠太近
+        const actions = document.createElement('div');
+        actions.style.display = 'flex';
+        actions.style.alignItems = 'center';
+        actions.style.gap = '8px';
+        actions.style.marginTop = '6px';
+        container.appendChild(actions);
+
+        // 如果当前用户未在公开列表中，提供“摊牌”按钮（自愿亮牌给所有人）
+        const alreadyRevealed = Array.isArray(state.showdown_reveal) && state.showdown_reveal.some(p => p.user_id === this.user?.user_id);
+        if (!alreadyRevealed) {
+            const revealBtn = document.createElement('button');
+            revealBtn.textContent = '摊牌';
+            revealBtn.style.padding = '4px 8px';
+            revealBtn.style.background = '#1976d2';
+            revealBtn.style.color = '#fff';
+            revealBtn.style.border = 'none';
+            revealBtn.style.borderRadius = '4px';
+            revealBtn.style.cursor = 'pointer';
+            revealBtn.addEventListener('click', () => {
+                try {
+                    this.sendMessage({ type: 'manual_show_cards' });
+                    this.showToast('已请求自愿摊牌', 'info');
+                } catch (e) {
+                    console.error('发送自愿摊牌消息失败：', e);
+                }
+            });
+            actions.appendChild(revealBtn);
+        }
 
         const list = document.createElement('div');
         list.style.display = 'flex';
         list.style.flexWrap = 'wrap';
         list.style.gap = '8px';
 
-        state.showdown_reveal.forEach(p => {
+        (Array.isArray(state.showdown_reveal) ? state.showdown_reveal : []).forEach(p => {
             const item = document.createElement('div');
             item.style.background = 'rgba(255,255,255,0.1)';
             item.style.border = '1px solid rgba(255,255,255,0.2)';

@@ -483,6 +483,26 @@ async def websocket_game_endpoint(websocket: WebSocket):
                 await handle_game_action(user, data, room_id)
             elif data.get("type") == "player_ready":
                 await handle_player_ready(user, data, room_id)
+            elif data.get("type") == "manual_show_cards":
+                # 自愿摊牌：公开当前玩家的两张手牌给所有人
+                game = active_games.get(room_id)
+                if game and hasattr(game, "voluntary_reveal"):
+                    ok = game.voluntary_reveal(user["user_id"])
+                    if ok:
+                        await manager.broadcast({
+                            "type": "game_state_update",
+                            "data": game.get_game_state()
+                        })
+                    else:
+                        await manager.send_personal_message({
+                            "type": "action_error",
+                            "message": "当前阶段不允许摊牌或用户不存在"
+                        }, user["user_id"])
+                else:
+                    await manager.send_personal_message({
+                        "type": "action_error",
+                        "message": "服务器暂不支持自愿摊牌或游戏未开始"
+                    }, user["user_id"])
                 
     except WebSocketDisconnect:
         print("WebSocket连接断开")
@@ -687,9 +707,8 @@ async def handle_game_end(room_id: str, game: TexasHoldemGame):
         "data": game_state
     })
     
-    # 清理游戏实例
-    if room_id in active_games:
-        del active_games[room_id]
+    # 保留已结束的游戏实例，以便结束后仍可自愿摊牌；新一局开始时再清理
+    # （不在此处删除 active_games[room_id]）
     
     # 重置全房间玩家的准备状态，并广播准备计数，进入“等待准备”状态
     db.execute_update(
@@ -716,9 +735,19 @@ async def check_game_start_condition(room_id: str):
     online_total = len(online_players)
     ready_online = sum(1 for p in online_players if p["is_ready"])
     
-    # 至少2名玩家，且玩家全部准备；且当前房间未有活跃游戏
-    if online_total >= 2 and ready_online == online_total and room_id not in active_games:
-        await start_game_in_room(room_id)
+    # 至少2名在线玩家，且全部已准备；允许在“无实例”或“存在已结束实例”情况下开启新局
+    if online_total >= 2 and ready_online == online_total:
+        if room_id in active_games:
+            existing = active_games[room_id]
+            try:
+                from game_logic.game_engine import GameStage
+                if hasattr(existing, "stage") and existing.stage == GameStage.ENDED:
+                    await start_game_in_room(room_id)
+            except Exception:
+                # 防御：若取阶段异常，不阻断流程
+                pass
+        else:
+            await start_game_in_room(room_id)
 
 async def update_ready_count(room_id: str):
     """更新准备人数计数"""
@@ -741,6 +770,14 @@ async def update_ready_count(room_id: str):
 
 async def start_game_in_room(room_id: str):
     """在房间中开始新游戏"""
+    # 若存在已结束的游戏实例，允许重启：先移除旧实例以便开始新手牌
+    if room_id in active_games:
+        existing = active_games[room_id]
+        try:
+            if hasattr(existing, "stage") and existing.stage == GameStage.ENDED:
+                del active_games[room_id]
+        except Exception:
+            pass
     if room_id not in active_games:
         # 创建新游戏实例
         room = get_room_by_id(room_id)

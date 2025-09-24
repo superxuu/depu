@@ -470,6 +470,27 @@ class TexasHoldemGame:
         self.side_pots = [{"cap": pot["cap"], "amount": pot["amount"], "eligible_count": len(pot["eligible"])} for pot in pots]
         return pots
     
+    def voluntary_reveal(self, user_id: str) -> bool:
+        """自愿亮牌：在摊牌/结束阶段，允许任意玩家将自己的两张手牌公开给所有人"""
+        # 仅在 SHOWDOWN 或 ENDED 阶段允许
+        if self.stage not in (GameStage.SHOWDOWN, GameStage.ENDED):
+            return False
+        player = self.player_manager.get_player(user_id)
+        if not player:
+            return False
+        # 已有则不重复添加
+        exists = any(item.get("user_id") == user_id for item in (self.showdown_reveal or []))
+        if exists:
+            return True
+        # 追加该玩家手牌
+        self.showdown_reveal = (self.showdown_reveal or []) + [{
+            "user_id": player.user_id,
+            "nickname": player.nickname,
+            "position": player.position,
+            "hole_cards": [card.to_dict() for card in player.hole_cards]
+        }]
+        return True
+
     def _determine_winner(self) -> bool:
         """确定赢家并分配筹码"""
         active_players = self.player_manager.get_active_players()
