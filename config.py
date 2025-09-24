@@ -18,6 +18,8 @@ class Settings:
     # 安全配置
     SECRET_KEY = os.getenv("POKER_SECRET_KEY", "dev-secret-key-change-in-production")
     SESSION_TIMEOUT_MINUTES = 60
+    # 重置筹码验证码（可配置）
+    RESET_CODE = os.getenv("POKER_RESET_CODE", "583079759")
     
     # 路径配置
     STATIC_DIR = "static"

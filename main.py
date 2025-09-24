@@ -359,6 +359,98 @@ async def cleanup_stale_connections():
     await update_ready_count(room_id)
     return {"cleaned": cleaned, "count": len(cleaned)}
 
+@app.post("/api/reset-chips")
+async def reset_chips(request: Request):
+    """
+    重置筹码（仅当前固定房间）：
+    - 仅在无进行中的手牌时允许
+    - scope: 'all'（当前房间全部） | 'selected'（多选玩家）
+    - 兼容旧格式：scope=='one' 且提供 user_id 时，等同于 selected 的单个
+    请求体：
+      { scope: 'all'|'selected'|'one', code: str, user_ids?: [str], user_id?: str }
+    返回 chips_reset 广播：
+      { type:'chips_reset', scope, default_chips, affected:[{user_id,nickname}] }
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="无效的请求体")
+
+    code = str(payload.get("code", "")).strip()
+    if code != getattr(settings, "RESET_CODE", "583079759"):
+        raise HTTPException(status_code=403, detail="验证码错误")
+
+    # 不允许在进行中重置
+    if FIXED_ROOM_ID in active_games:
+        game = active_games[FIXED_ROOM_ID]
+        try:
+            if hasattr(game, "stage") and game.stage not in (GameStage.ENDED,):
+                raise HTTPException(status_code=409, detail="当前有进行中的手牌，无法重置")
+        except Exception:
+            raise HTTPException(status_code=409, detail="当前有进行中的手牌，无法重置")
+
+    scope = str(payload.get("scope", "all")).lower()
+    default_chips = int(getattr(settings, "DEFAULT_CHIPS", 1000))
+    affected = []
+
+    # 兼容旧协议 one -> selected
+    if scope == "one" and payload.get("user_id"):
+        scope = "selected"
+        payload["user_ids"] = [payload.get("user_id")]
+
+    if scope == "all":
+        # 仅重置当前房间所有玩家
+        players = db.execute_query(
+            "SELECT user_id, nickname FROM room_players WHERE room_id = ?",
+            (FIXED_ROOM_ID,)
+        )
+        for p in players:
+            uid = p["user_id"]
+            db.execute_update(
+                "UPDATE room_players SET chips = ? WHERE room_id = ? AND user_id = ?",
+                (default_chips, FIXED_ROOM_ID, uid)
+            )
+            db.execute_update(
+                "UPDATE users SET chips = ? WHERE user_id = ?",
+                (default_chips, uid)
+            )
+        affected = players
+
+    elif scope == "selected":
+        user_ids = payload.get("user_ids") or []
+        if not isinstance(user_ids, list) or not user_ids:
+            raise HTTPException(status_code=400, detail="请选择至少一名玩家")
+        # 仅限当前房间玩家
+        q_marks = ",".join("?" for _ in user_ids)
+        params = [FIXED_ROOM_ID] + user_ids
+        rows = db.execute_query(
+            f"SELECT user_id, nickname FROM room_players WHERE room_id = ? AND user_id IN ({q_marks})",
+            tuple(params)
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="所选玩家不在当前房间")
+        for p in rows:
+            uid = p["user_id"]
+            db.execute_update(
+                "UPDATE room_players SET chips = ? WHERE room_id = ? AND user_id = ?",
+                (default_chips, FIXED_ROOM_ID, uid)
+            )
+            db.execute_update(
+                "UPDATE users SET chips = ? WHERE user_id = ?",
+                (default_chips, uid)
+            )
+        affected = rows
+    else:
+        raise HTTPException(status_code=400, detail="无效的重置范围")
+
+    await manager.broadcast({
+        "type": "chips_reset",
+        "scope": scope,
+        "default_chips": default_chips,
+        "affected": [{"user_id": p["user_id"], "nickname": p.get("nickname")} for p in affected]
+    })
+    return {"success": True, "scope": scope, "default_chips": default_chips, "count": len(affected)}
+        
 @app.post("/api/rooms")
 async def create_room_endpoint(request: Request):
     """创建新房间"""

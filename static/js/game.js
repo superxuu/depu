@@ -16,15 +16,18 @@ class PokerGame {
             this.socket.onopen = () => {
                 this.isConnected = true;
                 this.hideConnectionMessages();
+                try { this.showToast('WS已连接', 'info'); } catch (e) { console.log('WS已连接'); }
                 this.authenticate();
             };
             
             this.socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
+                    try { console.log('[WS] 收到消息类型:', data?.type); } catch (e) {}
                     this.handleMessage(data);
                 } catch (error) {
-                    console.error('解析消息错误:', error);
+                    console.error('解析消息错误:', error, '原始:', event.data);
+                    try { this.showToast('消息解析错误', 'error'); } catch (e) {}
                 }
             };
             
@@ -117,6 +120,9 @@ class PokerGame {
                 break;
             case 'ready_count_update':
                 this.handleReadyCountUpdate(data);
+                break;
+            case 'chips_reset':
+                this.handleChipsReset(data);
                 break;
             default:
                 console.warn('未知的消息类型:', data.type);
@@ -253,7 +259,8 @@ class PokerGame {
     
     handlePlayerJoined(data) {
         // 提示并主动刷新玩家列表，避免依赖后端额外广播
-        this.showToast(`${data.nickname} 加入了游戏`, 'info');
+        try { console.log('[WS] player_joined:', data); } catch (e) {}
+        this.showToast(`${data.nickname || data.user_id} 加入了游戏`, 'info');
         setTimeout(() => this.updateRoomPlayers(), 150);
     }
     
@@ -1141,6 +1148,73 @@ class PokerGame {
             const amount = parseInt(document.getElementById('raise-amount')?.value || 0);
             this.raise(amount);
         });
+
+        // 重置筹码按钮（使用弹窗进行范围/玩家/验证码选择）
+        document.getElementById('reset-chips-btn')?.addEventListener('click', async () => {
+            try {
+                return await this.openResetChipsDialog();
+                /* 简易交互：选择范围（已废弃，改用弹窗）
+                const scopeRaw = window.prompt('重置范围：输入 all（所有人）或 one（单人）', 'all');
+                if (!scopeRaw) return;
+                const scope = scopeRaw.trim().toLowerCase();
+                if (scope !== 'all' && scope !== 'one') {
+                    this.showToast('无效的范围，请输入 all 或 one', 'error');
+                    return;
+                }
+
+                let targetUserId = null;
+                if (scope === 'one') {
+                    // 拉取玩家列表，提示选择
+                    const data = await this.getRoomPlayers();
+                    const players = Array.isArray(data.players) ? data.players : [];
+                    if (players.length === 0) {
+                        this.showToast('暂无玩家可选', 'warning');
+                        return;
+                    }
+                    const listText = players.map(p => `${p.nickname} (${p.user_id})`).join('\n');
+                    const input = window.prompt(`选择要重置的玩家，输入其 user_id：
+${listText}`, players[0].user_id);
+                    if (!input) return;
+                    targetUserId = input.trim();
+                    if (!players.some(p => p.user_id === targetUserId)) {
+                        this.showToast('未找到该 user_id 对应玩家', 'error');
+                        return;
+                    }
+                }
+
+                // 输入验证码
+                const code = window.prompt('请输入验证码', '');
+                if (!code) return;
+
+                // 调用后端
+                const resp = await fetch('/api/reset-chips', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scope,
+                        user_id: targetUserId,
+                        code
+                    })
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    this.showToast(err.detail || '重置失败', 'error');
+                    return;
+                }
+                const js = await resp.json();
+                // 即时刷新本地显示
+                await this.updateRoomPlayers();
+                if (js.scope === 'all') {
+                    this.showToast(`已重置所有人筹码为默认值`, 'success');
+                } else {
+                    this.showToast(`已重置玩家筹码为默认值`, 'success');
+                }
+                */
+            } catch (e) {
+                console.error('重置筹码失败：', e);
+                this.showToast('重置筹码失败，请重试', 'error');
+            }
+        });
         
         // 页面退出/隐藏时主动告知后端离开并关闭socket，避免僵尸连接
         const sendLeave = () => {
@@ -1172,6 +1246,158 @@ class PokerGame {
         buttons.forEach(btn => btn.disabled = false);
     }
     
+    handleChipsReset(data) {
+        if (data.scope === 'all') {
+            this.showToast(`已将所有人筹码重置为 ${data.default_chips}`, 'info');
+        } else {
+            this.showToast(`已将 ${data.nickname || data.user_id} 的筹码重置为 ${data.default_chips}`, 'info');
+        }
+        // 刷新围坐显示
+        this.gameState = null;
+        this.updateRoomPlayers();
+    }
+
+    // 重置筹码弹窗（范围选择+玩家昵称选择+验证码）
+    async openResetChipsDialog() {
+        // 创建遮罩和对话框
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.left = '0';
+        overlay.style.top = '0';
+        overlay.style.right = '0';
+        overlay.style.bottom = '0';
+        overlay.style.background = 'rgba(0,0,0,0.45)';
+        overlay.style.zIndex = '10000';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+
+        const dialog = document.createElement('div');
+        dialog.style.background = '#fff';
+        dialog.style.color = '#000';
+        dialog.style.padding = '16px';
+        dialog.style.borderRadius = '8px';
+        dialog.style.minWidth = '320px';
+        dialog.style.maxWidth = '90%';
+        dialog.style.boxShadow = '0 6px 24px rgba(0,0,0,0.2)';
+        dialog.innerHTML = `
+            <div style="font-weight:600;font-size:16px;margin-bottom:10px;">重置筹码</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                <label style="display:flex;flex-direction:column;gap:6px;">
+                    <span>重置范围</span>
+                    <select id="reset-scope" style="padding:6px 8px;">
+                        <option value="all">所有人</option>
+                        <option value="selected">选择玩家</option>
+                    </select>
+                </label>
+                <label id="reset-player-wrap" style="display:none;flex-direction:column;gap:6px;">
+                    <span>选择玩家（昵称）</span>
+                    <select id="reset-player" multiple style="padding:6px 8px; min-width: 220px; min-height: 120px;"></select>
+                </label>
+                <label style="display:flex;flex-direction:column;gap:6px;">
+                    <span>验证码</span>
+                    <input id="reset-code" type="text" placeholder="请输入验证码" style="padding:6px 8px;border:1px solid #ddd;border-radius:4px;" />
+                </label>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px;">
+                    <button id="reset-cancel" class="action-btn btn-secondary">取消</button>
+                    <button id="reset-confirm" class="action-btn btn-warning">确认重置</button>
+                </div>
+            </div>
+        `;
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        // 数据加载：玩家列表（昵称）
+        let players = [];
+        try {
+            const data = await this.getRoomPlayers();
+            players = Array.isArray(data.players) ? data.players : [];
+        } catch (e) {
+            console.warn('获取玩家列表失败:', e);
+        }
+
+        const scopeSel = dialog.querySelector('#reset-scope');
+        const playerWrap = dialog.querySelector('#reset-player-wrap');
+        const playerSel = dialog.querySelector('#reset-player');
+        const codeInput = dialog.querySelector('#reset-code');
+        const btnCancel = dialog.querySelector('#reset-cancel');
+        const btnConfirm = dialog.querySelector('#reset-confirm');
+
+        // 填充玩家下拉：文本=昵称，值=user_id
+        const fillPlayers = () => {
+            if (!playerSel) return;
+            playerSel.innerHTML = '';
+            players.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.user_id;
+                opt.textContent = p.nickname;
+                playerSel.appendChild(opt);
+            });
+        };
+
+        const refreshVisibility = () => {
+            if (scopeSel.value === 'selected') {
+                playerWrap.style.display = 'flex';
+                if (playerSel.options.length === 0) fillPlayers();
+            } else {
+                playerWrap.style.display = 'none';
+            }
+        };
+
+        scopeSel.addEventListener('change', refreshVisibility);
+        refreshVisibility();
+
+        const close = () => {
+            try { document.body.removeChild(overlay); } catch (e) {}
+        };
+        btnCancel.addEventListener('click', () => close());
+
+        btnConfirm.addEventListener('click', async () => {
+            try {
+                const scope = scopeSel.value;
+                const code = String(codeInput.value || '').trim();
+                if (!code) {
+                    this.showToast('请输入验证码', 'error');
+                    return;
+                }
+                let userIds = [];
+                if (scope === 'selected') {
+                    userIds = Array.from(playerSel?.selectedOptions || []).map(o => o.value).filter(Boolean);
+                    if (userIds.length === 0) {
+                        this.showToast('请选择至少一位玩家', 'error');
+                        return;
+                    }
+                }
+                const payload = (scope === 'all')
+                    ? { scope, code }
+                    : { scope: 'selected', user_ids: userIds, code };
+                const resp = await fetch('/api/reset-chips', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    this.showToast(err.detail || '重置失败', 'error');
+                    return;
+                }
+                const js = await resp.json().catch(() => ({}));
+                await this.updateRoomPlayers();
+                if (js && js.scope === 'all') {
+                    this.showToast('已重置所有人筹码为默认值', 'success');
+                } else {
+                    this.showToast('已重置所选玩家筹码为默认值', 'success');
+                }
+                close();
+            } catch (e) {
+                console.error('确认重置失败:', e);
+                this.showToast('重置失败，请重试', 'error');
+            }
+        });
+
+        return true;
+    }
+
     updateGameStage(stage) {
         const stageEl = document.getElementById('game-stage');
         if (stageEl) {
