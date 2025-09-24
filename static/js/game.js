@@ -854,8 +854,21 @@ class PokerGame {
             this.raise(amount);
         });
         
-        
-
+        // 页面退出/隐藏时主动告知后端离开并关闭socket，避免僵尸连接
+        const sendLeave = () => {
+            try {
+                this.sendMessage({ type: 'player_leave' });
+            } catch (e) {}
+            try {
+                this.isManuallyClosed = true;
+                this.socket?.close();
+            } catch (e) {}
+        };
+        window.addEventListener('pagehide', sendLeave);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') sendLeave();
+        });
+        window.addEventListener('beforeunload', sendLeave);
 
     }
     
