@@ -1246,11 +1246,60 @@ ${listText}`, players[0].user_id);
         buttons.forEach(btn => btn.disabled = false);
     }
     
-    handleChipsReset(data) {
+    async handleChipsReset(data) {
         if (data.scope === 'all') {
             this.showToast(`已将所有人筹码重置为 ${data.default_chips}`, 'info');
         } else {
-            this.showToast(`已将 ${data.nickname || data.user_id} 的筹码重置为 ${data.default_chips}`, 'info');
+            // 构造昵称列表，兼容多选与不同后端载荷；确保尽可能显示具体昵称
+            let names = '';
+            const tryMap = (ids, list) => {
+                if (!Array.isArray(ids) || ids.length === 0) return '';
+                const arr = ids.map(uid => {
+                    const p = list.find(x => x && String(x.user_id) === String(uid));
+                    return p ? (p.nickname || String(uid)) : String(uid);
+                });
+                return arr.join('、');
+            };
+            try {
+                if (Array.isArray(data.nicknames) && data.nicknames.length > 0) {
+                    names = data.nicknames.join('、');
+                } else if (Array.isArray(data.players) && data.players.length > 0) {
+                    // 直接从对象数组中提取昵称
+                    names = (data.players || []).map(p => p && p.nickname).filter(Boolean).join('、');
+                } else if (Array.isArray(data.affected_players) && data.affected_players.length > 0) {
+                    // 兼容另一种字段名
+                    names = (data.affected_players || []).map(p => p && p.nickname).filter(Boolean).join('、');
+                } else if (Array.isArray(data.user_ids) && data.user_ids.length > 0) {
+                    // 1) 先用当前 gameState
+                    const src1 = (this.gameState && Array.isArray(this.gameState.players)) ? this.gameState.players : [];
+                    names = tryMap(data.user_ids, src1);
+                    // 2) 若仍为空或映射不全，则拉取 /api/players 按房间+在线再映射
+                    if (!names || /^\s*$/.test(names)) {
+                        try {
+                            const resp = await fetch('/api/players');
+                            const js = await resp.json().catch(() => ({ players: [] }));
+                            let list = Array.isArray(js.players) ? js.players : [];
+                            // 在线与房间过滤
+                            list = list.filter(p => p && p.connected === true);
+                            const roomId = this.user?.room_id || this.currentRoomId || window.ROOM_ID;
+                            if (roomId != null && roomId !== '') {
+                                list = list.filter(p => String(p.room_id ?? p.roomId ?? '') === String(roomId));
+                            }
+                            names = tryMap(data.user_ids, list);
+                        } catch (e2) {}
+                    }
+                    // 3) 若仍为空，最终用 user_ids 字符串展示
+                    if (!names || /^\s*$/.test(names)) {
+                        names = data.user_ids.map(String).join('、');
+                    }
+                } else if (data.nickname) {
+                    names = data.nickname;
+                } else if (data.user_id) {
+                    names = String(data.user_id);
+                }
+            } catch (e) {}
+            // 最终提示（尽量为具体昵称）
+            this.showToast(`已将 ${names && names.trim() ? names : '所选玩家'} 的筹码重置为 ${data.default_chips}`, 'info');
         }
         // 刷新围坐显示
         this.gameState = null;
@@ -1292,7 +1341,7 @@ ${listText}`, players[0].user_id);
                 </label>
                 <label id="reset-player-wrap" style="display:none;flex-direction:column;gap:6px;">
                     <span>选择玩家（昵称）</span>
-                    <select id="reset-player" multiple style="padding:6px 8px; min-width: 220px; min-height: 120px;"></select>
+                    <select id="reset-player" multiple style="padding:6px 8px; min-width: 200px; min-height: 80px;"></select>
                 </label>
                 <label style="display:flex;flex-direction:column;gap:6px;">
                     <span>验证码</span>
@@ -1312,6 +1361,17 @@ ${listText}`, players[0].user_id);
         try {
             const data = await this.getRoomPlayers();
             players = Array.isArray(data.players) ? data.players : [];
+            // 仅保留当前房间的玩家，防止跨房间数据混入
+            try {
+                const roomId = this.user?.room_id || this.currentRoomId || window.ROOM_ID;
+                if (roomId != null && roomId !== '') {
+                    players = players.filter(p => String(p.room_id ?? p.roomId) === String(roomId));
+                }
+            } catch (e) {
+                // 忽略过滤异常，回退为后端返回列表
+            }
+            // 仅保留在线玩家
+            players = (players || []).filter(p => p && p.connected === true);
         } catch (e) {
             console.warn('获取玩家列表失败:', e);
         }
