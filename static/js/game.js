@@ -803,6 +803,12 @@ class PokerGame {
             console.log('[UI] 点击刷新房间玩家');
             if (btn) btn.disabled = true;
             try {
+                // 先请求后端做一次心跳清理
+                try {
+                    await fetch('/api/cleanup-stale', { method: 'POST' });
+                } catch (probeErr) {
+                    console.warn('心跳清理请求失败：', probeErr);
+                }
                 this.gameState = null;
                 await this.updateRoomPlayers();
                 this.showToast('房间玩家已刷新', 'info');
@@ -821,6 +827,12 @@ class PokerGame {
                 console.log('[UI] 代理点击刷新房间玩家');
                 try {
                     target.disabled = true;
+                    // 先请求后端做一次心跳清理
+                    try {
+                        await fetch('/api/cleanup-stale', { method: 'POST' });
+                    } catch (probeErr) {
+                        console.warn('心跳清理请求失败：', probeErr);
+                    }
                     this.gameState = null;
                     await this.updateRoomPlayers();
                     this.showToast('房间玩家已刷新', 'info');
