@@ -797,17 +797,37 @@ class PokerGame {
         // 准备按钮
         document.getElementById('ready-btn')?.addEventListener('click', () => this.setReady());
         document.getElementById('unready-btn')?.addEventListener('click', () => this.setUnready());
-        // 刷新房间玩家按钮：主动拉取并重绘围坐
+        // 刷新房间玩家按钮：主动拉取并重绘围坐（直接绑定）
         document.getElementById('refresh-room-btn')?.addEventListener('click', async () => {
             const btn = document.getElementById('refresh-room-btn');
+            console.log('[UI] 点击刷新房间玩家');
             if (btn) btn.disabled = true;
             try {
                 await this.updateRoomPlayers();
                 this.showToast('房间玩家已刷新', 'info');
             } catch (e) {
+                console.error('刷新失败:', e);
                 this.showToast('刷新失败，请重试', 'error');
             } finally {
                 if (btn) btn.disabled = false;
+            }
+        });
+
+        // 兜底：全局事件代理，确保按钮即使动态渲染也能触发
+        document.addEventListener('click', async (e) => {
+            const target = e.target;
+            if (target && target.id === 'refresh-room-btn') {
+                console.log('[UI] 代理点击刷新房间玩家');
+                try {
+                    target.disabled = true;
+                    await this.updateRoomPlayers();
+                    this.showToast('房间玩家已刷新', 'info');
+                } catch (err) {
+                    console.error('代理刷新失败:', err);
+                    this.showToast('刷新失败，请重试', 'error');
+                } finally {
+                    target.disabled = false;
+                }
             }
         });
         
