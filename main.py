@@ -464,6 +464,19 @@ async def websocket_game_endpoint(websocket: WebSocket):
             "nickname": user["nickname"]
         }, user["user_id"])
         
+        # 若房间已有正在进行的游戏，单播当前权威状态给刚加入/重连的玩家，避免回到准备界面
+        if room_id in active_games:
+            try:
+                game = active_games[room_id]
+                if hasattr(game, "get_game_state"):
+                    await manager.send_personal_message({
+                        "type": "game_state",
+                        "data": game.get_game_state()
+                    }, user["user_id"])
+            except Exception as _e:
+                # 仅记录，不影响后续流程
+                print(f"单播进行中游戏状态失败: {_e}")
+        
         # 玩家加入后，更新准备计数
         await update_ready_count(room_id)
         # 加一道自动开局检查：若此时所有玩家都已准备，直接触发开局
