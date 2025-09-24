@@ -797,6 +797,19 @@ class PokerGame {
         // 准备按钮
         document.getElementById('ready-btn')?.addEventListener('click', () => this.setReady());
         document.getElementById('unready-btn')?.addEventListener('click', () => this.setUnready());
+        // 刷新房间玩家按钮：主动拉取并重绘围坐
+        document.getElementById('refresh-room-btn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('refresh-room-btn');
+            if (btn) btn.disabled = true;
+            try {
+                await this.updateRoomPlayers();
+                this.showToast('房间玩家已刷新', 'info');
+            } catch (e) {
+                this.showToast('刷新失败，请重试', 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        });
         
         // 操作按钮
         document.getElementById('fold-btn')?.addEventListener('click', () => this.fold());
