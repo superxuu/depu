@@ -339,13 +339,20 @@ async def cleanup_stale_connections():
         if probe_failed or timed_out:
             # 清理失效或超时连接
             manager.disconnect(user_id)
+            # 先查昵称，再删除
+            row = db.execute_query(
+                "SELECT nickname FROM room_players WHERE room_id = ? AND user_id = ?",
+                (room_id, user_id)
+            )
+            nickname = (row[0]["nickname"] if row and "nickname" in row[0] else None) or user_id
             db.execute_update(
                 "DELETE FROM room_players WHERE room_id = ? AND user_id = ?",
                 (room_id, user_id)
             )
             await manager.broadcast({
                 "type": "player_left",
-                "user_id": user_id
+                "user_id": user_id,
+                "nickname": nickname
             })
             cleaned.append(user_id)
     # 刷新准备计数
@@ -552,16 +559,24 @@ async def websocket_game_endpoint(websocket: WebSocket):
         if user_id:
             manager.disconnect(user_id)
             
+            # 在删除前查询昵称
+            row = db.execute_query(
+                "SELECT nickname FROM room_players WHERE room_id = ? AND user_id = ?",
+                (FIXED_ROOM_ID, user_id)
+            )
+            nickname = (row[0]["nickname"] if row and "nickname" in row[0] else None) or user_id
+
             # 从数据库中移除玩家
             db.execute_update(
                 "DELETE FROM room_players WHERE room_id = ? AND user_id = ?",
                 (FIXED_ROOM_ID, user_id)
             )
             
-            # 广播玩家离开消息
+            # 广播玩家离开消息（包含昵称）
             await manager.broadcast({
                 "type": "player_left",
-                "user_id": user_id
+                "user_id": user_id,
+                "nickname": nickname
             })
 
             # 玩家离开后，更新准备计数
