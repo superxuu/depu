@@ -132,12 +132,14 @@ class TexasHoldemGame:
                 sb_amount = self.min_bet // 2
                 if small_blind_player.can_afford(sb_amount):
                     small_blind_player.bet(sb_amount)
+                    small_blind_player.last_action = 'sb'
                     self.pot += sb_amount
                 else:
                     # SB 全下
                     actual = small_blind_player.chips
                     if actual > 0:
                         small_blind_player.bet(actual)
+                        small_blind_player.last_action = 'sb'
                         self.pot += actual
         
         if big_blind_pos:
@@ -146,6 +148,7 @@ class TexasHoldemGame:
                 bb_amount = self.min_bet
                 if big_blind_player.can_afford(bb_amount):
                     big_blind_player.bet(bb_amount)
+                    big_blind_player.last_action = 'bb'
                     self.pot += bb_amount
                     self.current_bet = bb_amount
                     # 初始化最低加注增量为大盲额
@@ -155,6 +158,7 @@ class TexasHoldemGame:
                     actual = big_blind_player.chips
                     if actual > 0:
                         big_blind_player.bet(actual)
+                        big_blind_player.last_action = 'bb'
                         self.pot += actual
                         self.current_bet = max(self.current_bet, actual)
                         self.last_raise_increment = max(self.last_raise_increment, actual)
@@ -270,6 +274,8 @@ class TexasHoldemGame:
         # 重置玩家当前下注额
         for player in self.player_manager.players:
             player.current_bet = 0
+            # 新一轮下注开始时清空上轮“最近一次操作”标记
+            player.last_action = ''
         
         self.current_bet = 0
         # 重置本街行动记录
@@ -617,6 +623,7 @@ class TexasHoldemGame:
             "community_cards": [card.to_dict() for card in self.community_cards],
             "pot": self.pot,
             "current_bet": self.current_bet,
+            "dealer_position": self.player_manager.dealer_position,
             # 兼容字段：保留已有 current_player（位置号），并补充更明确的两个字段
             "current_player": self.current_player_position,            # 位置号（向后兼容）
             "current_player_position": self.current_player_position,   # 位置号（显式）

@@ -79,6 +79,10 @@ templates = Jinja2Templates(directory=settings.TEMPLATES_DIR)
 active_games: Dict[str, Any] = {}  # room_id -> game instance
 connected_players: Dict[str, WebSocket] = {}  # user_id -> websocket
 
+# 观战/等待下一手
+spectators: Dict[str, set] = {}
+waiting_next_hand: Dict[str, set] = {}
+
 # 工具函数
 def create_session_token() -> str:
     """创建会话令牌"""
@@ -297,7 +301,9 @@ async def get_players(request: Request):
             "nickname": player["nickname"],
             "chips": player["chips"],
             "is_ready": player.get("is_ready", 0),
-            "connected": player["user_id"] in manager.active_connections
+            "connected": player["user_id"] in manager.active_connections,
+            "is_spectator": player["user_id"] in spectators.get(FIXED_ROOM_ID, set()),
+            "waiting_next_hand": player["user_id"] in waiting_next_hand.get(FIXED_ROOM_ID, set())
         }
         for player in players
     ]
@@ -469,10 +475,23 @@ async def websocket_game_endpoint(websocket: WebSocket):
             try:
                 game = active_games[room_id]
                 if hasattr(game, "get_game_state"):
+                    state = game.get_game_state()
                     await manager.send_personal_message({
                         "type": "game_state",
-                        "data": game.get_game_state()
+                        "data": state
                     }, user["user_id"])
+                    # 不在本手牌玩家中 -> 标记观战并告知观战状态
+                    try:
+                        const_in_hand = any(p.get("user_id") == user["user_id"] for p in state.get("players", []))
+                    except Exception:
+                        const_in_hand = False
+                    if not const_in_hand:
+                        spectators.setdefault(room_id, set()).add(user["user_id"])
+                        await manager.send_personal_message({
+                            "type": "spectator_status",
+                            "is_spectator": True,
+                            "waiting_next_hand": user["user_id"] in waiting_next_hand.get(room_id, set())
+                        }, user["user_id"])
             except Exception as _e:
                 # 仅记录，不影响后续流程
                 print(f"单播进行中游戏状态失败: {_e}")
@@ -496,6 +515,11 @@ async def websocket_game_endpoint(websocket: WebSocket):
                 await handle_game_action(user, data, room_id)
             elif data.get("type") == "player_ready":
                 await handle_player_ready(user, data, room_id)
+            elif data.get("type") == "sit_next_hand":
+                # 申请在下一手入座：记录等待队列与观战身份
+                waiting_next_hand.setdefault(room_id, set()).add(user["user_id"])
+                spectators.setdefault(room_id, set()).add(user["user_id"])
+                await manager.send_personal_message({"type": "sit_ack", "success": True}, user["user_id"])
             elif data.get("type") == "manual_show_cards":
                 # 自愿摊牌：公开当前玩家的两张手牌给所有人
                 game = active_games.get(room_id)

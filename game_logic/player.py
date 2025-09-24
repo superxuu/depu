@@ -20,6 +20,8 @@ class Player:
     starting_chips: int = 0
     # 是否为本手牌胜者
     win: bool = False
+    # 最近一次操作（fold/check/call/raise/sb/bb/all-in等）
+    last_action: str = ''
     
     def receive_cards(self, cards: List[Card]) -> None:
         """接收手牌"""
@@ -29,6 +31,7 @@ class Player:
         """弃牌"""
         self.is_folded = True
         self.is_active = False
+        self.last_action = 'fold'
     
     def bet(self, amount: int) -> int:
         """下注"""
@@ -42,14 +45,17 @@ class Player:
     
     def call(self, amount: int) -> int:
         """跟注"""
+        self.last_action = 'call'
         return self.bet(amount - self.current_bet)
     
     def raise_bet(self, amount: int) -> int:
         """加注"""
+        self.last_action = 'raise'
         return self.bet(amount)
     
     def check(self) -> None:
         """过牌"""
+        self.last_action = 'check'
         pass  # 不需要操作
     
     def reset_round(self) -> None:
@@ -93,7 +99,8 @@ class Player:
             "is_all_in": self.is_all_in(),
             # 新增用于前端展示的字段
             "hand_delta": self.chips - self.starting_chips if self.starting_chips else 0,
-            "win": self.win
+            "win": self.win,
+            "last_action": self.last_action
         }
     
     @classmethod

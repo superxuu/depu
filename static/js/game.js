@@ -101,7 +101,7 @@ class PokerGame {
                 this.handlePlayerDisconnected(data);
                 break;
             case 'game_started':
-                this.handleGameStarted();
+                this.handleGameStarted(data);
                 break;
             case 'game_ended':
                 this.handleGameEnded(data);
@@ -123,7 +123,7 @@ class PokerGame {
         }
     }
     
-    handleAuthSuccess(data) {
+    async handleAuthSuccess(data) {
         // 清除认证超时
         if (this.authTimeout) {
             clearTimeout(this.authTimeout);
@@ -142,7 +142,24 @@ class PokerGame {
         // 认证成功后设置事件监听器
         this.setupEventListeners();
         // 认证成功后立即更新玩家列表
-        this.updateRoomPlayers();
+        await this.updateRoomPlayers();
+
+        // 兜底：如果房间已有进行中的对局或刚开局，拉取权威状态并立刻渲染，以便显示庄家 D
+        try {
+            const resp = await fetch('/api/room/status');
+            if (resp.ok) {
+                const js = await resp.json();
+                if (js && js.game_state) {
+                    this.gameState = js.game_state;
+                    // 用权威状态立即渲染玩家和阶段（显示庄家 D）
+                    const stage = this.normalizeStage(this.gameState?.stage || 'waiting');
+                    this.updateGameStage(stage);
+                    this.renderPlayers();
+                }
+            }
+        } catch (e) {
+            console.warn('认证后获取房间状态失败（兜底）：', e);
+        }
         
         this.showToast('连接成功', 'success');
     }
@@ -251,11 +268,29 @@ class PokerGame {
         setTimeout(() => this.updateRoomPlayers(), 150);
     }
     
-    handleGameStarted() {
+    async handleGameStarted(payload) {
         const ov = document.getElementById('showdown-reveal');
         if (ov) ov.remove();
+        // 优先使用服务端随附的权威状态
+        if (payload && payload.data) {
+            this.gameState = payload.data;
+        } else {
+            // 兜底：立即从后端获取当前房间状态，拿到 dealer_position 等权威信息
+            try {
+                const resp = await fetch('/api/room/status');
+                if (resp.ok) {
+                    const js = await resp.json();
+                    if (js && js.game_state) this.gameState = js.game_state;
+                }
+            } catch (e) {
+                console.warn('获取房间状态失败（game_started兜底）:', e);
+            }
+        }
         this.showToast('游戏开始！', 'success');
-        this.updateGameStage('preflop');
+        // 依据当前状态更新阶段显示并立刻渲染玩家（以显示庄家 D）
+        const stage = this.normalizeStage(this.gameState?.stage || 'preflop');
+        this.updateGameStage(stage);
+        this.renderPlayers();
         // 游戏开始，切换到游戏操作按钮
         this.toggleGameActions(true);
     }
@@ -407,8 +442,19 @@ class PokerGame {
     toggleGameActions(showGameActions) {
         const readySection = document.getElementById('ready-section');
         const gameActionSection = document.getElementById('game-action-section');
-        
+
+        // 判定是否为观战者：当游戏有状态且本机用户不在本手牌 players 列表中
+        const isSpectator = !!(this.gameState
+            && Array.isArray(this.gameState.players)
+            && !this.gameState.players.some(p => p && p.user_id === this.user?.user_id));
+
         if (readySection && gameActionSection) {
+            if (isSpectator) {
+                // 观战者：不显示游戏操作区，始终显示“准备”以加入下一手
+                readySection.style.display = 'flex';
+                gameActionSection.style.display = 'none';
+                return;
+            }
             if (showGameActions) {
                 // 仅在服务端明确开始游戏时切换到操作区
                 readySection.style.display = 'none';
@@ -541,6 +587,8 @@ class PokerGame {
             return;
         }
         playersContainer.innerHTML = '';
+        // 预计算用于渲染的庄家位置（优先使用后端提供，其次用小盲推导）
+        this.dealerPositionForRender = this.computeDealerPositionForRender();
 
         let players = [];
         // 优先使用 WebSocket 推送的 gameState 数据，这是最实时的权威来源
@@ -707,11 +755,24 @@ class PokerGame {
             this.renderPlayerHoleCards(player.hole_cards);
         }
         
+        // 庄家徽标（D）- 优先使用后端字段，缺失则使用兜底推导
+        const dealerPos = Number(this.gameState?.dealer_position || 0) || Number(this.dealerPositionForRender || 0);
+        const isDealer = dealerPos && Number(dealerPos) === Number(player.position);
+        const dealerBadge = isDealer ? `<div class="dealer-badge" title="庄家" style="display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:#ffb300;color:#000;font-weight:bold;font-size:12px;margin-left:6px;">D</div>` : '';
         // 准备状态指示器
         const readyIndicator = player.is_ready ? 
             `<div class="ready-indicator" title="已准备">✓</div>` : '';
         // 胜利徽标（摊牌后）
         const winBadge = player.win ? `<div class="win-badge" title="本手牌获胜">WIN</div>` : '';
+        // 操作徽标（最近一次操作）
+        const actionMap = { 'check': '过牌', 'call': '跟注', 'raise': '加注', 'fold': '弃牌', 'sb': '小盲', 'bb': '大盲' };
+        let actionText = '';
+        if (player && player.is_all_in) {
+            actionText = 'ALL-IN';
+        } else if (player && player.last_action && actionMap[player.last_action]) {
+            actionText = actionMap[player.last_action];
+        }
+        const actionBadge = actionText ? `<div class="action-badge" style="display:inline-block;padding:2px 6px;border-radius:10px;background:rgba(255,255,255,0.85);color:#000;font-size:12px;margin-top:4px;">${actionText}</div>` : '';
         // 手牌净变化（仅在非0时展示）
         const deltaHtml = (typeof player.hand_delta === 'number' && player.hand_delta !== 0)
             ? `<div class="player-delta ${player.hand_delta > 0 ? 'pos' : 'neg'}">
@@ -720,11 +781,12 @@ class PokerGame {
             : '';
         
         playerEl.innerHTML = `
-            <div class="player-nickname">${player.nickname}</div>
+            <div class="player-nickname">${player.nickname}${dealerBadge}</div>
             <div class="player-chips-circle">${player.chips}</div>
             ${deltaHtml}
             ${player.current_bet > 0 ? `<div class="player-bet-circle">下注: ${player.current_bet}</div>` : ''}
             <div class="player-status-circle">${this.getPlayerStatusText(player)}</div>
+            ${actionBadge}
             ${readyIndicator}
             ${winBadge}
         `;
@@ -805,6 +867,77 @@ class PokerGame {
             'spades': '♠'
         };
         return symbols[suit] || suit[0].toUpperCase();
+    }
+
+    // 依据当前 gameState 推导庄家位置（兜底逻辑）
+    computeDealerPositionForRender() {
+        const gs = this.gameState;
+        if (!gs || !Array.isArray(gs.players) || gs.players.length === 0) return 0;
+
+        // 1) 若后端已提供，则直接使用
+        const provided = Number(gs.dealer_position || 0);
+        if (provided) return provided;
+
+        // 收集活跃玩家的座位号（未弃牌）
+        const active = gs.players.filter(p => p && !p.is_folded);
+        const positions = active
+            .map(p => Number(p.position))
+            .filter(n => !isNaN(n))
+            .sort((a, b) => a - b);
+        if (positions.length === 0) return 0;
+
+        // 工具：取 positions 中 pos 的前一位/前两位（环绕）
+        const prevOf = (pos) => {
+            const i = positions.indexOf(Number(pos));
+            if (i === -1) return 0;
+            return positions[(i - 1 + positions.length) % positions.length] || 0;
+        };
+        const prev2Of = (pos) => {
+            const i = positions.indexOf(Number(pos));
+            if (i === -1) return 0;
+            return positions[(i - 2 + positions.length) % positions.length] || 0;
+        };
+
+        // 2) 若有小盲 sb：两人局=sb，多人局=sb 的前一位
+        const sb = gs.players.find(p => p && p.last_action === 'sb');
+        if (sb) {
+            if (active.length === 2) return Number(sb.position || 0);
+            return prevOf(sb.position);
+        }
+
+        // 3) 若仅看到大盲 bb：
+        const bb = gs.players.find(p => p && p.last_action === 'bb');
+        if (bb) {
+            if (active.length === 2) {
+                // 两人局：庄家=非 bb 的那位
+                const other = positions.find(x => x !== Number(bb.position));
+                return Number(other || 0);
+            }
+            // 多人局：dealer -> sb -> bb，故 dealer 为 bb 的前两位
+            return prev2Of(bb.position);
+        }
+
+        // 4) 两人局额外兜底：用当前下注额推断SB/BB
+        if (active.length === 2) {
+            const a = active[0];
+            const b = active[1];
+            const abet = Number(a.current_bet || 0);
+            const bbet = Number(b.current_bet || 0);
+            if (abet > 0 && bbet > 0) {
+                // 较小的是小盲 -> 庄家
+                if (abet < bbet) return Number(a.position || 0);
+                if (bbet < abet) return Number(b.position || 0);
+            } else if (abet > 0 && bbet === 0) {
+                // 仅a有下注，视为BB -> 庄家为另一个(b)
+                return Number(b.position || 0);
+            } else if (bbet > 0 && abet === 0) {
+                // 仅b有下注，视为BB -> 庄家为另一个(a)
+                return Number(a.position || 0);
+            }
+        }
+
+        // 5) 无法推导则不显示
+        return 0;
     }
 
     // 摊牌阶段展示所有仍在局内玩家的手牌
