@@ -1263,6 +1263,9 @@ ${listText}`, players[0].user_id);
             try {
                 if (Array.isArray(data.nicknames) && data.nicknames.length > 0) {
                     names = data.nicknames.join('、');
+                } else if (Array.isArray(data.affected) && data.affected.length > 0) {
+                    // 后端标准载荷：affected[{user_id,nickname}]
+                    names = (data.affected || []).map(p => (p && (p.nickname || String(p.user_id)))).filter(Boolean).join('、');
                 } else if (Array.isArray(data.players) && data.players.length > 0) {
                     // 直接从对象数组中提取昵称
                     names = (data.players || []).map(p => p && p.nickname).filter(Boolean).join('、');
