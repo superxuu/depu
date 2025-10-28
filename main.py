@@ -5,6 +5,7 @@ AI扑克训练主入口 - 使用纯sqlite3实现
 import os
 import sys
 import uuid
+import time
 from datetime import datetime
 from typing import Optional, Dict, Any
 
@@ -82,6 +83,116 @@ connected_players: Dict[str, WebSocket] = {}  # user_id -> websocket
 # 观战/等待下一手
 spectators: Dict[str, set] = {}
 waiting_next_hand: Dict[str, set] = {}
+
+# 超时检查任务
+import asyncio
+timeout_check_task: Optional[asyncio.Task] = None
+cleanup_task: Optional[asyncio.Task] = None
+
+async def check_timeout_loop():
+    """定期检查游戏超时的后台任务"""
+    while True:
+        try:
+            await asyncio.sleep(5)  # 每5秒检查一次
+            
+            for room_id, game in list(active_games.items()):
+                # 检查单玩家场景
+                if game and hasattr(game, 'single_player_waiting') and game.single_player_waiting:
+                    waiting_info = game.single_player_waiting
+                    user_id = waiting_info["user_id"]
+                    
+                    # 检查是否超时（默认等待时间15秒）
+                    elapsed = time.time() - waiting_info["start_time"]
+                    if elapsed > game.single_player_grace_period:
+                        # 超时自动结束游戏
+                        print(f"单玩家等待超时，自动结束游戏")
+                        game.handle_single_player_decision(user_id, "end")
+                        await handle_game_end(room_id, game)
+                
+                if game and hasattr(game, 'is_action_timeout') and game.is_action_timeout():
+                    # 处理超时玩家
+                    timed_out_players = game.auto_fold_timeout_players()
+                    
+                    if timed_out_players:
+                        # 广播游戏状态更新
+                        await manager.broadcast({
+                            "type": "game_state_update",
+                            "data": game.get_game_state()
+                        })
+                        
+                        # 发送超时通知
+                        for player in timed_out_players:
+                            await manager.send_personal_message({
+                                "type": "action_timeout",
+                                "message": f"玩家 {player.nickname} 操作超时，自动{'过牌' if game.current_bet == 0 else '弃牌'}"
+                            }, player.user_id)
+                            
+        except Exception as e:
+            print(f"超时检查出错: {e}")
+            await asyncio.sleep(5)  # 出错后等待5秒再继续
+
+async def periodic_cleanup_loop():
+    """定期清理离线玩家记录的后台任务"""
+    while True:
+        try:
+            await asyncio.sleep(60)  # 每分钟执行一次清理
+            
+            # 获取当前时间戳
+            current_time = time.time()
+            TIMEOUT = 90  # 90秒无活动视为离线
+            
+            # 使用 list() 拷贝，避免迭代过程中修改字典
+            for user_id, ws in list(manager.active_connections.items()):
+                probe_failed = False
+                try:
+                    await ws.send_json({"type": "heartbeat_probe"})
+                except Exception:
+                    probe_failed = True
+                
+                last = getattr(manager, "last_seen", {}).get(user_id, 0.0)
+                timed_out = (current_time - last) > TIMEOUT
+                
+                if probe_failed or timed_out:
+                    # 清理失效或超时连接
+                    manager.disconnect(user_id)
+                    
+                    # 先查昵称，再删除
+                    row = db.execute_query(
+                        "SELECT nickname FROM room_players WHERE room_id = ? AND user_id = ?",
+                        (FIXED_ROOM_ID, user_id)
+                    )
+                    nickname = (row[0]["nickname"] if row and "nickname" in row[0] else None) or user_id
+                    
+                    db.execute_update(
+                        "DELETE FROM room_players WHERE room_id = ? AND user_id = ?",
+                        (FIXED_ROOM_ID, user_id)
+                    )
+                    
+                    await manager.broadcast({
+                        "type": "player_left",
+                        "user_id": user_id,
+                        "nickname": nickname
+                    })
+                    print(f"清理离线玩家: {nickname} (ID: {user_id})")
+            
+            # 刷新准备计数
+            await update_ready_count(FIXED_ROOM_ID)
+            
+        except Exception as e:
+            print(f"定期清理出错: {e}")
+            await asyncio.sleep(60)  # 出错后等待1分钟再继续
+
+def start_timeout_check():
+    """启动超时检查任务"""
+    global timeout_check_task
+    if timeout_check_task is None:
+        timeout_check_task = asyncio.create_task(check_timeout_loop())
+
+def start_periodic_cleanup():
+    """启动定期清理任务"""
+    global cleanup_task
+    if cleanup_task is None:
+        cleanup_task = asyncio.create_task(periodic_cleanup_loop())
 
 # 工具函数
 def create_session_token() -> str:
@@ -450,7 +561,7 @@ async def reset_chips(request: Request):
         "affected": [{"user_id": p["user_id"], "nickname": p.get("nickname")} for p in affected]
     })
     return {"success": True, "scope": scope, "default_chips": default_chips, "count": len(affected)}
-        
+
 @app.post("/api/rooms")
 async def create_room_endpoint(request: Request):
     """创建新房间"""
@@ -541,6 +652,17 @@ async def websocket_game_endpoint(websocket: WebSocket):
         # 使用固定房间ID
         room_id = FIXED_ROOM_ID
         
+        # 通知游戏引擎玩家上线
+        if room_id in active_games:
+            active_games[room_id].handle_player_reconnect(user["user_id"])
+            
+            # 广播玩家重连消息
+            await manager.broadcast({
+                "type": "player_reconnected",
+                "user_id": user["user_id"],
+                "nickname": user["nickname"]
+            }, user["user_id"])
+        
         # 添加玩家到房间（使用数据库存储）
         db.execute_update(
             "INSERT OR REPLACE INTO room_players (room_id, user_id, nickname, chips) VALUES (?, ?, ?, ?)",
@@ -562,11 +684,29 @@ async def websocket_game_endpoint(websocket: WebSocket):
             "user": user
         }, user["user_id"])
         
-        # 广播玩家加入消息
+        # 先获取最新的玩家状态
+        players = db.execute_query(
+            "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
+            (room_id,)
+        )
+        
+        # 构建完整的玩家状态信息
+        players_status = []
+        for player in players:
+            players_status.append({
+                "user_id": player["user_id"],
+                "nickname": player["nickname"],
+                "chips": player["chips"],
+                "is_ready": player.get("is_ready", 0),
+                "connected": player["user_id"] in manager.active_connections
+            })
+        
+        # 广播玩家加入消息，同时包含最新的玩家状态
         await manager.broadcast({
             "type": "player_joined",
             "user_id": user["user_id"],
-            "nickname": user["nickname"]
+            "nickname": user["nickname"],
+            "players": players_status  # 包含完整的玩家状态数据
         }, user["user_id"])
         
         # 若房间已有正在进行的游戏，单播当前权威状态给刚加入/重连的玩家，避免回到准备界面
@@ -597,6 +737,8 @@ async def websocket_game_endpoint(websocket: WebSocket):
         
         # 玩家加入后，更新准备计数
         await update_ready_count(room_id)
+        # 立即更新所有玩家的状态显示（确保其他消息也包含最新状态）
+        await update_all_players_status(room_id)
         # 加一道自动开局检查：若此时所有玩家都已准备，直接触发开局
         await check_game_start_condition(room_id)
         
@@ -639,6 +781,28 @@ async def websocket_game_endpoint(websocket: WebSocket):
                         "type": "action_error",
                         "message": "服务器暂不支持自愿摊牌或游戏未开始"
                     }, user["user_id"])
+            elif data.get("type") == "single_player_decision":
+                # 处理单玩家的决定（继续/结束）
+                game = active_games.get(room_id)
+                if game:
+                    decision = data.get("decision")  # "continue" 或 "end"
+                    success = game.handle_single_player_decision(user["user_id"], decision)
+                    if success:
+                        # 广播游戏状态更新
+                        game_state = game.get_game_state()
+                        await manager.broadcast({
+                            "type": "game_state_update",
+                            "data": game_state
+                        })
+                        
+                        # 如果选择结束，调用游戏结束处理
+                        if decision == "end":
+                            await handle_game_end(room_id, game)
+                    else:
+                        await manager.send_personal_message({
+                            "type": "action_error",
+                            "message": "无法处理您的决定"
+                        }, user["user_id"])
                 
     except WebSocketDisconnect:
         print("WebSocket连接断开")
@@ -649,6 +813,7 @@ async def websocket_game_endpoint(websocket: WebSocket):
                 break
         
         if user_id:
+            # 先断开连接管理器
             manager.disconnect(user_id)
             
             # 在删除前查询昵称
@@ -664,18 +829,101 @@ async def websocket_game_endpoint(websocket: WebSocket):
                 (FIXED_ROOM_ID, user_id)
             )
             
-            # 广播玩家离开消息（包含昵称）
+            # 确保数据库操作完成后再广播消息
+            import time
+            time.sleep(0.1)  # 短暂延迟确保数据库操作完成
+            
+            # 立即广播玩家离开消息（包含昵称）
             await manager.broadcast({
                 "type": "player_left",
                 "user_id": user_id,
                 "nickname": nickname
             })
+            
+            # 通知游戏引擎玩家离线
+            game = active_games.get(FIXED_ROOM_ID)
+            if game:
+                # 先标记为离线
+                game.set_player_disconnected(user_id)
+                
+                # 检查是否需要自动跳过当前玩家
+                if (game.current_player_position and 
+                    game.player_manager.get_player(user_id) and 
+                    game.player_manager.get_player(user_id).position == game.current_player_position):
+                    # 当前离线玩家需要行动，自动跳过
+                    game._move_to_next_player()
+                
+                # 延迟检查单玩家场景（等待5秒，确认玩家是否重连）
+                async def check_single_player_after_delay():
+                    await asyncio.sleep(5)  # 等待5秒
+                    
+                    # 再次检查是否有游戏
+                    if FIXED_ROOM_ID not in active_games:
+                        return
+                    
+                    game_check = active_games.get(FIXED_ROOM_ID)
+                    if not game_check:
+                        return
+                    
+                    # 检查该玩家是否已重连
+                    if user_id in manager.active_connections:
+                        print(f"玩家 {user_id} 已重连，不触发单玩家场景")
+                        return
+                    
+                    # 玩家确实离线，检查是否只剩1人
+                    online_count = len([p for p in game_check.player_manager.get_active_players() 
+                                      if p.user_id in game_check.connected_players and 
+                                      p.user_id not in game_check.spectating_players])
+                    
+                    print(f"延迟检查: 玩家 {user_id} 确实离线，剩余在线玩家: {online_count}")
+                    
+                    if online_count == 1:
+                        print("触发单玩家等待场景")
+                        game_check._check_single_player_and_wait()
+                        await manager.broadcast({
+                            "type": "game_state_update",
+                            "data": game_check.get_game_state()
+                        })
+                
+                # 启动延迟检查任务
+                asyncio.create_task(check_single_player_after_delay())
+                
+                # 立即广播当前状态（移除该玩家的显示）
+                await manager.broadcast({
+                    "type": "game_state_update",
+                    "data": game.get_game_state()
+                })
 
+            # 先获取最新的玩家状态
+            players = db.execute_query(
+                "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
+                (FIXED_ROOM_ID,)
+            )
+            
+            # 构建完整的玩家状态信息
+            players_status = []
+            for player in players:
+                players_status.append({
+                    "user_id": player["user_id"],
+                    "nickname": player["nickname"],
+                    "chips": player["chips"],
+                    "is_ready": player.get("is_ready", 0),
+                    "connected": player["user_id"] in manager.active_connections
+                })
+            
             # 玩家离开后，更新准备计数
             await update_ready_count(FIXED_ROOM_ID)
-            # 离开后也检查一次是否满足开局条件（例如剩余玩家全部已准备且≥2）
-            await check_game_start_condition(FIXED_ROOM_ID)
-
+            # 立即更新所有玩家的状态显示
+            await update_all_players_status(FIXED_ROOM_ID)
+            
+            # 广播玩家离开消息，同时包含最新的玩家状态
+            await manager.broadcast({
+                "type": "player_left",
+                "user_id": user_id,
+                "nickname": nickname,
+                "players": players_status  # 包含完整的玩家状态数据
+            })
+            
             # 检查房间是否还有玩家
             remaining_players = db.execute_query(
                 "SELECT COUNT(*) as count FROM room_players WHERE room_id = ?",
@@ -686,6 +934,21 @@ async def websocket_game_endpoint(websocket: WebSocket):
             if remaining_players and remaining_players[0]["count"] == 0:
                 if FIXED_ROOM_ID in active_games:
                     del active_games[FIXED_ROOM_ID]
+            # 如果游戏因玩家不足自动结束，延迟检查开局条件，避免状态冲突
+            elif FIXED_ROOM_ID in active_games:
+                game = active_games[FIXED_ROOM_ID]
+                if hasattr(game, "stage") and game.stage == GameStage.ENDED:
+                    # 游戏已因玩家不足结束，延迟2秒后再检查开局条件
+                    # 给前端足够时间处理游戏结束状态
+                    import asyncio
+                    await asyncio.sleep(2)
+                    await check_game_start_condition(FIXED_ROOM_ID)
+                else:
+                    # 正常情况，立即检查开局条件
+                    await check_game_start_condition(FIXED_ROOM_ID)
+            else:
+                # 没有游戏实例，正常检查开局条件
+                await check_game_start_condition(FIXED_ROOM_ID)
     except Exception as e:
         print(f"WebSocket错误: {e}")
         try:
@@ -694,6 +957,32 @@ async def websocket_game_endpoint(websocket: WebSocket):
             pass
 
 
+
+async def update_all_players_status(room_id: str):
+    """更新所有玩家的状态显示"""
+    # 获取最新的玩家列表和状态
+    players = db.execute_query(
+        "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
+        (room_id,)
+    )
+    
+    if players:
+        # 构建完整的玩家状态信息
+        players_status = []
+        for player in players:
+            players_status.append({
+                "user_id": player["user_id"],
+                "nickname": player["nickname"],
+                "chips": player["chips"],
+                "is_ready": player.get("is_ready", 0),
+                "connected": player["user_id"] in manager.active_connections
+            })
+        
+        # 广播完整的玩家状态更新
+        await manager.broadcast({
+            "type": "players_status_update",
+            "players": players_status
+        })
 
 async def handle_player_ready(user: Dict[str, Any], data: Dict[str, Any], room_id: str):
     """处理玩家准备状态"""
@@ -711,6 +1000,9 @@ async def handle_player_ready(user: Dict[str, Any], data: Dict[str, Any], room_i
         "user_id": user["user_id"],
         "is_ready": is_ready
     })
+    
+    # 立即更新所有玩家的状态显示
+    await update_all_players_status(room_id)
     
     # 检查是否可以开始游戏
     await check_game_start_condition(room_id)
@@ -879,17 +1171,28 @@ async def check_game_start_condition(room_id: str):
     online_total = len(online_players)
     ready_online = sum(1 for p in online_players if p["is_ready"])
     
+    # 添加调试信息
+    print(f"房间 {room_id} 准备检查: 在线{online_total}人，已准备{ready_online}人")
+    
     # 至少2名在线玩家，且全部已准备；允许在“无实例”或“存在已结束实例”情况下开启新局
     if online_total >= 2 and ready_online == online_total:
         if room_id in active_games:
             existing = active_games[room_id]
             try:
                 from game_logic.game_engine import GameStage
-                if hasattr(existing, "stage") and existing.stage == GameStage.ENDED:
+                if hasattr(existing, "stage"):
+                    # 如果游戏已结束，可以开始新游戏
+                    if existing.stage == GameStage.ENDED:
+                        await start_game_in_room(room_id)
+                    # 如果游戏还未结束，不做任何操作
+                    else:
+                        print(f"房间 {room_id} 游戏正在进行中，不重新开始")
+                else:
+                    # 没有stage属性，开始新游戏
                     await start_game_in_room(room_id)
-            except Exception:
-                # 防御：若取阶段异常，不阻断流程
-                pass
+            except Exception as e:
+                print(f"检查游戏阶段时出错: {e}")
+                await start_game_in_room(room_id)
         else:
             await start_game_in_room(room_id)
 
@@ -897,12 +1200,14 @@ async def update_ready_count(room_id: str):
     """更新准备人数计数"""
     # 获取准备状态信息
     players_data = db.execute_query(
-        "SELECT is_ready FROM room_players WHERE room_id = ?",
+        "SELECT user_id, is_ready FROM room_players WHERE room_id = ?",
         (room_id,)
     )
     
-    total_players = len(players_data)
-    ready_players = sum(1 for player in players_data if player["is_ready"])
+    # 只统计在线玩家
+    online_players = [p for p in players_data if p["user_id"] in manager.active_connections]
+    total_players = len(online_players)
+    ready_players = sum(1 for player in online_players if player["is_ready"])
     
     # 广播准备人数更新
     await manager.broadcast({
@@ -914,14 +1219,20 @@ async def update_ready_count(room_id: str):
 
 async def start_game_in_room(room_id: str):
     """在房间中开始新游戏"""
+    print(f"开始房间 {room_id} 的新游戏")
+    
     # 若存在已结束的游戏实例，允许重启：先移除旧实例以便开始新手牌
     if room_id in active_games:
         existing = active_games[room_id]
         try:
             if hasattr(existing, "stage") and existing.stage == GameStage.ENDED:
                 del active_games[room_id]
-        except Exception:
-            pass
+                print(f"移除已结束的游戏实例")
+            else:
+                print(f"游戏实例存在且未结束，阶段: {existing.stage}")
+        except Exception as e:
+            print(f"检查游戏实例时出错: {e}")
+            del active_games[room_id]
     if room_id not in active_games:
         # 创建新游戏实例
         room = get_room_by_id(room_id)
@@ -943,23 +1254,56 @@ async def start_game_in_room(room_id: str):
             if p["user_id"] in manager.active_connections and p.get("is_ready")
         ]
         
+        print(f"符合条件玩家数: {len(eligible_players)}, 玩家详情: {eligible_players}")
+        
         # 人数不足2，不启动
         if len(eligible_players) < 2:
+            print(f"人数不足2人，无法开始游戏")
             if room_id in active_games:
                 del active_games[room_id]
+            # 向所有在线玩家发送错误信息
+            await manager.broadcast({
+                "type": "game_start_error",
+                "message": f"人数不足，无法开始游戏。当前在线玩家：{len(eligible_players)}人，至少需要2人才能开始游戏。"
+            })
             return False
         
         # 添加玩家到游戏（顺序按当前列表顺序）
         for player in eligible_players:
+            print(f"添加玩家到游戏: {player['nickname']} (ID: {player['user_id']})")
+            
+            # 检查筹码，如果不足则补充到默认筹码
+            if player["chips"] < game.min_bet:
+                print(f"玩家 {player['nickname']} 筹码不足 ({player['chips']} < {game.min_bet})，自动补充到默认筹码")
+                # 更新数据库中的筹码
+                db.execute_update(
+                    "UPDATE users SET chips = ? WHERE user_id = ?",
+                    (1000, player["user_id"])
+                )
+                # 更新房间玩家表中的筹码
+                db.execute_update(
+                    "UPDATE room_players SET chips = ? WHERE room_id = ? AND user_id = ?",
+                    (1000, room_id, player["user_id"])
+                )
+                # 更新本地筹码
+                player["chips"] = 1000
+            
             game.add_player(
                 user_id=player["user_id"],
                 nickname=player["nickname"],
                 chips=player["chips"],
                 position=len(game.player_manager.players) + 1
             )
+            # 确保玩家在线状态正确设置
+            game.set_player_connected(player["user_id"])
+        
+        print(f"游戏中玩家总数: {len(game.player_manager.players)}")
+        print(f"在线活跃玩家数: {len(game.get_online_active_players())}")
         
         # 开始游戏
+        print(f"尝试开始游戏...")
         if game.start_game():
+            print(f"游戏成功开始！")
             update_room_status(room_id, "playing")
             
             # 广播游戏开始（提示用）
@@ -975,14 +1319,33 @@ async def start_game_in_room(room_id: str):
             })
             
             return True
+        else:
+            print(f"游戏开始失败")
+            # 向所有在线玩家发送错误信息
+            await manager.broadcast({
+                "type": "game_start_error",
+                "message": "游戏开始失败，请检查玩家筹码是否充足。"
+            })
     
     return False
 
-if __name__ == "__main__":
-    import uvicorn
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时初始化"""
     print("AI扑克训练启动中...")
     print(f"访问地址: http://{settings.HOST}:{settings.PORT}")
     print(f"API文档: http://{settings.HOST}:{settings.PORT}/docs")
+    
+    # 启动超时检查任务
+    start_timeout_check()
+    print("游戏超时检查任务已启动")
+    
+    # 启动定期清理任务
+    start_periodic_cleanup()
+    print("定期清理任务已启动")
+
+if __name__ == "__main__":
+    import uvicorn
     
     uvicorn.run(
         "main:app",

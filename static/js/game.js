@@ -1,12 +1,21 @@
+
 class PokerGame {
     constructor(user) {
+        console.log('PokerGame构造函数被调用，user:', user);
         this.user = user;
         this.socket = null;
         this.gameState = null;
         this.isConnected = false;
+        this.isManuallyClosed = false;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 3000; // 初始重连延迟3秒
         
+        console.log('开始初始化WebSocket...');
         this.initializeSocket();
+        console.log('开始启动心跳...');
         this.startHeartbeat();
+        console.log('PokerGame构造函数完成');
     }
     
     initializeSocket() {
@@ -20,11 +29,11 @@ class PokerGame {
                 this.authenticate();
             };
             
-            this.socket.onmessage = (event) => {
+            this.socket.onmessage = async (event) => {
                 try {
                     const data = JSON.parse(event.data);
                     try { console.log('[WS] 收到消息类型:', data?.type); } catch (e) {}
-                    this.handleMessage(data);
+                    await this.handleMessage(data);
                 } catch (error) {
                     console.error('解析消息错误:', error, '原始:', event.data);
                     try { this.showToast('消息解析错误', 'error'); } catch (e) {}
@@ -35,11 +44,26 @@ class PokerGame {
                 this.isConnected = false;
                 this.showDisconnectedMessage();
                 
-                // 自动重连机制（如果不是手动关闭）
-                if (!this.isManuallyClosed) {
+                // 显示重连按钮
+                this.showReconnectButton();
+                
+                // 自动重连机制（如果不是手动关闭且未超过最大重连次数）
+                if (!this.isManuallyClosed && this.reconnectAttempts < this.maxReconnectAttempts) {
+                    this.reconnectAttempts++;
+                    
+                    // 计算重连延迟，每次重连延迟增加
+                    const delay = this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1);
+                    
+                    // 游戏结束后延迟重连，避免状态冲突
+                    const finalDelay = this.gameState && this.gameState.stage === 'ended' ? Math.max(delay, 5000) : delay;
+                    
+                    console.log(`连接断开，${finalDelay}ms后尝试第${this.reconnectAttempts}次重连...`);
+                    
                     setTimeout(() => {
                         this.initializeSocket();
-                    }, 3000);
+                    }, finalDelay);
+                } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                    this.showErrorMessage('已达到最大重连次数，请刷新页面重试');
                 }
             };
             
@@ -68,15 +92,19 @@ class PokerGame {
             session_token: sessionToken
         });
         
-        // 设置认证超时检查（5秒）
+        // 设置认证超时检查（增加到10秒）
         this.authTimeout = setTimeout(() => {
             if (!this.isConnected) {
-                this.showErrorMessage('认证超时，请检查网络连接');
+                this.showErrorMessage('认证超时，正在尝试重新连接...');
+                // 关闭当前连接，触发自动重连
+                if (this.socket) {
+                    this.socket.close();
+                }
             }
-        }, 5000);
+        }, 10000);
     }
     
-    handleMessage(data) {
+    async handleMessage(data) {
         switch (data.type) {
             case 'auth_success':
                 this.handleAuthSuccess(data);
@@ -94,14 +122,21 @@ class PokerGame {
                 this.handleActionError(data);
                 break;
             
+            case 'game_start_error':
+                this.handleGameStartError(data);
+                break;
+            
             case 'player_joined':
-                this.handlePlayerJoined(data);
+                await this.handlePlayerJoined(data);
                 break;
             case 'player_left':
-                this.handlePlayerLeft(data);
+                await this.handlePlayerLeft(data);
                 break;
             case 'player_disconnected':
-                this.handlePlayerDisconnected(data);
+                await this.handlePlayerDisconnected(data);
+                break;
+            case 'player_reconnected':
+                await this.handlePlayerReconnected(data);
                 break;
             case 'game_started':
                 this.handleGameStarted(data);
@@ -124,6 +159,9 @@ class PokerGame {
             case 'chips_reset':
                 this.handleChipsReset(data);
                 break;
+            case 'players_status_update':
+                this.handlePlayersStatusUpdate(data);
+                break;
             default:
                 console.warn('未知的消息类型:', data.type);
         }
@@ -136,8 +174,15 @@ class PokerGame {
             this.authTimeout = null;
         }
         
+        // 重置重连计数器
+        this.reconnectAttempts = 0;
+        
         this.isConnected = true;
         this.hideConnectionMessages();
+        
+        // 隐藏重连按钮
+        this.hideReconnectButton();
+        
         console.log('认证成功');
         
         // 更新用户信息（确保session_token一致）
@@ -145,10 +190,15 @@ class PokerGame {
             this.user = { ...this.user, ...data.user };
         }
         
-        // 认证成功后设置事件监听器
-        this.setupEventListeners();
         // 认证成功后立即更新玩家列表
+        console.log('开始 updateRoomPlayers');
         await this.updateRoomPlayers();
+        console.log('updateRoomPlayers 完成');
+        
+        // 认证成功后设置事件监听器（确保在DOM元素加载后）
+        console.log('开始 setupEventListeners');
+        this.setupEventListeners();
+        console.log('setupEventListeners 完成');
 
         // 兜底：如果房间已有进行中的对局或刚开局，拉取权威状态并立刻渲染，以便显示庄家 D
         try {
@@ -180,6 +230,14 @@ class PokerGame {
         
         // 检查游戏阶段，如果是结束阶段，不调用renderGameState以避免覆盖准备按钮
         const stage = this.normalizeStage(gameState.stage);
+        
+        // 检查单玩家等待状态（只在有游戏进行中时检查）
+        if (stage && stage !== 'ended' && stage !== 'waiting' && gameState.single_player_waiting && gameState.single_player_waiting.user_id === this.user?.user_id) {
+            this.showSinglePlayerDialog();
+        } else {
+            this.hideSinglePlayerDialog();
+        }
+        
         if (stage !== 'ended') {
             this.renderGameState();
         } else {
@@ -204,6 +262,10 @@ class PokerGame {
     handleActionError(data) {
         this.showToast(data.message, 'error');
         this.enableActionButtons();
+    }
+    
+    handleGameStartError(data) {
+        this.showToast(data.message || '游戏开始失败', 'error');
     }
     
     // 规范化阶段值，兼容后端大写/枚举等形式
@@ -257,22 +319,49 @@ class PokerGame {
     
     
     
-    handlePlayerJoined(data) {
-        // 提示并主动刷新玩家列表，避免依赖后端额外广播
+    async handlePlayerJoined(data) {
+        // 提示并立即刷新玩家列表
         try { console.log('[WS] player_joined:', data); } catch (e) {}
         this.showToast(`${data.nickname || data.user_id} 加入了游戏`, 'info');
-        setTimeout(() => this.updateRoomPlayers(), 150);
+        
+        // 如果消息中包含玩家数据，直接使用；否则从API获取
+        if (data.players) {
+            console.log('使用消息中的玩家数据:', data.players);
+            this.latestPlayersData = { players: data.players };
+            await this.renderPlayers();
+        } else {
+            // 兜底：从API获取最新玩家数据
+            await this.updateRoomPlayersForce();
+        }
     }
     
-    handlePlayerLeft(data) {
-        // 提示并主动刷新玩家列表
+    async handlePlayerLeft(data) {
+        // 提示并立即刷新玩家列表
         this.showToast(`玩家 ${data.nickname || data.user_id} 离开了游戏`, 'info');
-        setTimeout(() => this.updateRoomPlayers(), 150);
+        
+        // 如果消息中包含玩家数据，直接使用；否则从API获取
+        if (data.players) {
+            console.log('使用消息中的玩家数据:', data.players);
+            this.latestPlayersData = { players: data.players };
+            await this.renderPlayers();
+        } else {
+            // 兜底：从API获取最新玩家数据
+            await this.updateRoomPlayersForce();
+        }
     }
     
-    handlePlayerDisconnected(data) {
-        this.showToast(`玩家 ${data.user_id} 断开连接`, 'warning');
-        setTimeout(() => this.updateRoomPlayers(), 150);
+    async handlePlayerDisconnected(data) {
+        this.showToast(`玩家 ${data.nickname || data.user_id} 断开连接`, 'warning');
+        
+        // 强制从API获取最新玩家数据，确保实时性
+        await this.updateRoomPlayersForce();
+    }
+    
+    async handlePlayerReconnected(data) {
+        this.showToast(`玩家 ${data.nickname || data.user_id} 重新连接`, 'success');
+        
+        // 强制从API获取最新玩家数据，确保实时性
+        await this.updateRoomPlayersForce();
     }
     
     async handleGameStarted(payload) {
@@ -369,9 +458,26 @@ class PokerGame {
         this.updateReadyCount(data.ready_count, data.total_players);
     }
     
+    handlePlayersStatusUpdate(data) {
+        // 处理玩家状态更新消息，保存最新数据并立即刷新玩家列表显示
+        console.log('收到玩家状态更新消息:', data);
+        this.latestPlayersData = data;
+        this.renderPlayers();
+    }
+    
     setReady() {
+        console.log('准备按钮被点击');
         const ov = document.getElementById('showdown-reveal');
         if (ov) ov.remove();
+        
+        // 检查连接状态
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket 未连接，无法准备');
+            this.showToast('连接已断开，请刷新页面', 'error');
+            return;
+        }
+        
+        console.log('发送准备消息');
         this.sendMessage({
             type: 'player_ready',
             is_ready: true
@@ -379,8 +485,18 @@ class PokerGame {
     }
     
     setUnready() {
+        console.log('取消准备按钮被点击');
         const ov = document.getElementById('showdown-reveal');
         if (ov) ov.remove();
+        
+        // 检查连接状态
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket 未连接，无法取消准备');
+            this.showToast('连接已断开，请刷新页面', 'error');
+            return;
+        }
+        
+        console.log('发送取消准备消息');
         this.sendMessage({
             type: 'player_ready',
             is_ready: false
@@ -489,7 +605,34 @@ class PokerGame {
         }
     }
     
+    showSinglePlayerDialog() {
+        const overlay = document.getElementById('single-player-overlay');
+        if (overlay) {
+            overlay.classList.add('active');
+        }
+    }
+    
+    hideSinglePlayerDialog() {
+        const overlay = document.getElementById('single-player-overlay');
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
+    }
+    
+    sendSinglePlayerDecision(decision) {
+        this.sendMessage({
+            type: 'single_player_decision',
+            decision: decision
+        });
+    }
+    
     sendAction(action, amount = 0) {
+        // 确保只在“轮到我行动”时发送
+        const cpUserId = this.deriveCurrentPlayerId();
+        if (cpUserId && cpUserId !== this.user.user_id) {
+            this.showToast('未轮到你行动', 'warning');
+            return;
+        }
         this.disableActionButtons();
         this.sendMessage({
             type: 'game_action',
@@ -526,6 +669,18 @@ class PokerGame {
         return this.gameState.current_bet - currentPlayer.current_bet;
     }
     
+    // 统一：本回合最小加注增量（优先后端last_raise_increment，否则min_bet）
+    getLastIncrement() {
+        const inc = Number(this.gameState?.last_raise_increment ?? this.gameState?.min_bet ?? 0);
+        return isNaN(inc) ? 0 : inc;
+    }
+    // 统一：本回合“最小加到”目标总注 = 台面当前总注 + 最小增量
+    getMinRaiseTarget() {
+        const tableBet = Number(this.gameState?.current_bet || 0);
+        const lastInc = this.getLastIncrement();
+        return tableBet + lastInc;
+    }
+
     renderGameState() {
         if (!this.gameState) return;
         
@@ -591,6 +746,7 @@ class PokerGame {
     async renderPlayers() {
         const playersContainer = document.getElementById('players-container');
         if (!playersContainer) {
+            console.warn('playersContainer 不存在');
             return;
         }
         playersContainer.innerHTML = '';
@@ -598,23 +754,33 @@ class PokerGame {
         this.dealerPositionForRender = this.computeDealerPositionForRender();
 
         let players = [];
-        // 优先使用 WebSocket 推送的 gameState 数据，这是最实时的权威来源
-        if (this.gameState && this.gameState.players && this.gameState.players.length > 0) {
-            players = this.gameState.players;
+        
+        // 优先使用WebSocket消息中的实时玩家数据
+        if (this.latestPlayersData && this.latestPlayersData.players) {
+            console.log('renderPlayers - 使用WebSocket实时玩家数据');
+            players = this.latestPlayersData.players;
         } else {
-            // 仅在 gameState 不可用时（如页面首次加载），回退到 API
+            // 兜底：从API获取最新的玩家数据
+            console.log('renderPlayers - 从API获取最新玩家数据（兜底）');
             try {
                 const response = await fetch('/api/players');
                 if (response.ok) {
                     const data = await response.json();
-                    players = (data.players || []).filter(p => p && p.connected === true);
+                    console.log('从 API 获取的玩家数据:', data);
+                    // 不过滤离线玩家，显示所有玩家但通过样式区分连接状态
+                    players = data.players || [];
+                    console.log('所有玩家（包括离线）:', players);
                 } else {
-                    console.error('API 获取玩家列表失败');
-                    return;
+                    console.error('API 获取玩家列表失败, status:', response.status);
+                    const errorText = await response.text();
+                    console.error('错误详情:', errorText);
+                    // 即使API失败也要继续，至少清空列表
+                    players = [];
                 }
             } catch (error) {
                 console.error('API 请求玩家信息失败:', error);
-                return;
+                // 继续执行，不返回
+                players = [];
             }
         }
 
@@ -652,7 +818,9 @@ class PokerGame {
         try {
             const response = await fetch('/api/players');
             if (response.ok) {
-                return await response.json();
+                const data = await response.json();
+                // 修复：正确返回API响应中的players数组
+                return data.players || [];
             }
             return [];
         } catch (error) {
@@ -662,7 +830,19 @@ class PokerGame {
     }
     
     async updateRoomPlayers() {
+        console.log('updateRoomPlayers 被调用');
+        // 直接调用renderPlayers，因为它现在总是从API获取最新数据
         await this.renderPlayers();
+        console.log('updateRoomPlayers 完成');
+    }
+    
+    async updateRoomPlayersForce() {
+        console.log('updateRoomPlayersForce 被调用');
+        // 强制清空缓存数据，确保从API获取最新数据
+        this.latestPlayersData = null;
+        // 直接调用renderPlayers，它会从API获取最新数据
+        await this.renderPlayers();
+        console.log('updateRoomPlayersForce 完成');
     }
     
     renderPlayersWithData(players) {
@@ -711,20 +891,44 @@ class PokerGame {
                 callBtn.disabled = true;
             }
         }
-        // “过牌”按钮始终可用
+        // 仅在无需跟注（本街无下注或己方已匹配当前注）时允许过牌
         if (checkBtn) {
-            checkBtn.disabled = false;
+            checkBtn.disabled = callAmount > 0;
+            if (checkBtn.disabled) {
+                checkBtn.title = '当前有未匹配的下注，需跟注或加注';
+            } else {
+                checkBtn.title = '';
+            }
         }
         
         const raiseBtn = document.getElementById('raise-btn');
         const raiseInput = document.getElementById('raise-amount');
+        const allinBtn = document.getElementById('allin-btn');
         if (raiseBtn && raiseInput) {
-            const minRaise = safeCurrentBet + safeMinBet;
-            raiseInput.min = String(minRaise);
-            // 保护：无 chips 时设置为0
-            raiseInput.max = String(Number(currentPlayer.chips || 0));
-            // 不能加注时置灰，但不隐藏
-            raiseBtn.disabled = Number(currentPlayer.chips || 0) < minRaise;
+            const chips = Number(currentPlayer.chips || 0);
+            const lastInc = this.getLastIncrement();
+            const callNeed = Math.max(0, callAmount); // 需先补足的跟注额
+
+            // 输入框表示“加到的总注（raise-to）”，范围：下限=至少加到，上限=我的当前总注+剩余筹码
+            const minTarget = this.getMinRaiseTarget();
+            const myBet = Number(currentPlayer.current_bet || 0);
+            raiseInput.min = String(minTarget);
+            raiseInput.max = String(myBet + chips);
+
+            // 若筹码不足以达到“跟注额 + 最小增量”，加注按钮置灰
+            raiseBtn.disabled = chips < (callNeed + lastInc);
+
+            // 更新最小增量提示（同时展示“至少加到”目标总注）
+            const hintEl = document.getElementById('min-increment-hint');
+            if (hintEl) {
+                const minTargetText = this.getMinRaiseTarget();
+                hintEl.textContent = `（最小增量：${lastInc}；加注是在跟注的基础上再增加的下注。）`;
+            }
+        }
+        if (allinBtn) {
+            const chipsLeft = Number(currentPlayer.chips || 0);
+            allinBtn.textContent = `全下 ${chipsLeft}`;
+            allinBtn.disabled = chipsLeft <= 0;
         }
     }
     
@@ -745,13 +949,17 @@ class PokerGame {
         const playerEl = document.createElement('div');
         const position = this.calculatePlayerPosition(index, totalPlayers);
         
+        // 获取玩家连接状态 - 使用后端返回的 connected 字段
+        const isConnected = player.connected === true;
+        
         playerEl.className = `player-circle 
                             ${player.user_id === this.user.user_id ? 'current-player' : ''} 
                             ${player.is_folded ? 'folded' : ''} 
                             ${player.is_current_turn ? 'current-turn' : ''}
                             ${player.is_all_in ? 'all-in' : ''}
                             ${player.is_ready ? 'ready' : ''}
-                            ${player.win ? 'winner' : ''}`;
+                            ${player.win ? 'winner' : ''}
+                            ${!isConnected ? 'offline' : ''}`;
         
         // 设置玩家在椭圆上的位置（百分比）
         playerEl.style.left = `${position.x}%`;
@@ -766,6 +974,11 @@ class PokerGame {
         const dealerPos = Number(this.gameState?.dealer_position || 0) || Number(this.dealerPositionForRender || 0);
         const isDealer = dealerPos && Number(dealerPos) === Number(player.position);
         const dealerBadge = isDealer ? `<div class="dealer-badge" title="庄家" style="display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:#ffb300;color:#000;font-weight:bold;font-size:12px;margin-left:6px;">D</div>` : '';
+        
+        // 离线状态标识
+        const offlineBadge = !isConnected ? 
+            `<div class="offline-badge" title="离线">⚫</div>` : '';
+        
         // 准备状态指示器
         const readyIndicator = player.is_ready ? 
             `<div class="ready-indicator" title="已准备">✓</div>` : '';
@@ -788,7 +1001,7 @@ class PokerGame {
             : '';
         
         playerEl.innerHTML = `
-            <div class="player-nickname">${player.nickname}${dealerBadge}</div>
+            <div class="player-nickname">${player.nickname}${dealerBadge}${offlineBadge}</div>
             <div class="player-chips-circle">${player.chips}</div>
             ${deltaHtml}
             ${player.current_bet > 0 ? `<div class="player-bet-circle">下注: ${player.current_bet}</div>` : ''}
@@ -1088,10 +1301,67 @@ class PokerGame {
         container.appendChild(list);
     }
     
+    // 显示重连按钮
+    showReconnectButton() {
+        const reconnectBtn = document.getElementById('reconnect-btn');
+        if (reconnectBtn) {
+            reconnectBtn.style.display = 'block';
+        }
+    }
+    
+    // 隐藏重连按钮
+    hideReconnectButton() {
+        const reconnectBtn = document.getElementById('reconnect-btn');
+        if (reconnectBtn) {
+            reconnectBtn.style.display = 'none';
+        }
+    }
+    
+    // 手动重连方法
+    manualReconnect() {
+        // 如果已经连接，不执行重连
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            this.showToast('已连接，无需重连', 'info');
+            return;
+        }
+        
+        // 重置重连计数器
+        this.reconnectAttempts = 0;
+        
+        // 显示重连中提示
+        this.showToast('正在尝试重新连接...', 'info');
+        
+        // 关闭当前连接（如果存在）
+        if (this.socket) {
+            this.isManuallyClosed = true;
+            this.socket.close();
+            this.socket = null;
+        }
+        
+        // 延迟一点时间后重新初始化连接
+        setTimeout(() => {
+            this.isManuallyClosed = false;
+            this.initializeSocket();
+        }, 500);
+    }
+    
     setupEventListeners() {
-        // 准备按钮
-        document.getElementById('ready-btn')?.addEventListener('click', () => this.setReady());
-        document.getElementById('unready-btn')?.addEventListener('click', () => this.setUnready());
+        // 准备按钮 - 使用更可靠的事件绑定方式
+        const readyBtn = document.getElementById('ready-btn');
+        if (readyBtn) {
+            readyBtn.addEventListener('click', () => this.setReady());
+            console.log('准备按钮事件绑定成功');
+        } else {
+            console.error('准备按钮元素未找到');
+        }
+        
+        const unreadyBtn = document.getElementById('unready-btn');
+        if (unreadyBtn) {
+            unreadyBtn.addEventListener('click', () => this.setUnready());
+            console.log('取消准备按钮事件绑定成功');
+        } else {
+            console.error('取消准备按钮元素未找到');
+        }
         // 刷新房间玩家按钮：主动拉取并重绘围坐（直接绑定）
         document.getElementById('refresh-room-btn')?.addEventListener('click', async () => {
             const btn = document.getElementById('refresh-room-btn');
@@ -1118,6 +1388,22 @@ class PokerGame {
         // 兜底：全局事件代理，确保按钮即使动态渲染也能触发
         document.addEventListener('click', async (e) => {
             const target = e.target;
+            
+            // 处理准备按钮点击
+            if (target && target.id === 'ready-btn') {
+                console.log('[全局事件] 准备按钮被点击');
+                this.setReady();
+                return;
+            }
+            
+            // 处理取消准备按钮点击
+            if (target && target.id === 'unready-btn') {
+                console.log('[全局事件] 取消准备按钮被点击');
+                this.setUnready();
+                return;
+            }
+            
+            // 处理刷新房间玩家按钮
             if (target && target.id === 'refresh-room-btn') {
                 console.log('[UI] 代理点击刷新房间玩家');
                 try {
@@ -1139,82 +1425,79 @@ class PokerGame {
                 }
             }
         });
+
         
         // 操作按钮
         document.getElementById('fold-btn')?.addEventListener('click', () => this.fold());
         document.getElementById('check-btn')?.addEventListener('click', () => this.check());
         document.getElementById('call-btn')?.addEventListener('click', () => this.call());
         document.getElementById('raise-btn')?.addEventListener('click', () => {
-            const amount = parseInt(document.getElementById('raise-amount')?.value || 0);
-            this.raise(amount);
+            const inputEl = document.getElementById('raise-amount');
+            const raw = inputEl ? Number(inputEl.value || 0) : 0; // 目标总注（raise-to）
+            if (!this.gameState || !Array.isArray(this.gameState.players)) return;
+
+            const me = this.gameState.players.find(p => p.user_id === this.user.user_id);
+            if (!me) return;
+            const chips = Number(me.chips || 0);
+            const myBet = Number(me.current_bet || 0);
+            const minTarget = this.getMinRaiseTarget(); // 当前台面总注 + 最小增量
+
+            // 校验：目标总注不得低于“至少加到”
+            if (raw < minTarget) {
+                this.showToast(`至少加到 ${minTarget}`, 'error');
+                return;
+            }
+            // 我需要补的筹码 = 目标总注 - 我的当前总注
+            const need = Math.max(0, raw - myBet);
+            if (chips < need) {
+                this.showToast(`筹码不足：至少需要 ${need}`, 'error');
+                return;
+            }
+            // 发送到后端的 amount 是“目标总注（raise-to）”
+            this.raise(raw);
+        });
+
+        // 全下（不足额加注不重开行动由后端处理）
+        document.getElementById('allin-btn')?.addEventListener('click', () => {
+            if (!this.gameState || !Array.isArray(this.gameState.players)) return;
+            const me = this.gameState.players.find(p => p.user_id === this.user.user_id);
+            if (!me) return;
+            const myBet = Number(me.current_bet || 0);
+            const chips = Number(me.chips || 0);
+            if (chips <= 0) {
+                this.showToast('没有可用筹码，无法全下', 'error');
+                return;
+            }
+            const target = myBet + chips; // 目标总注=当前总注+剩余筹码
+            this.raise(target);
+        });
+        
+        // 单玩家弹窗按钮
+        document.getElementById('single-player-continue')?.addEventListener('click', () => {
+            this.sendSinglePlayerDecision('continue');
+            this.hideSinglePlayerDialog();
+        });
+        
+        document.getElementById('single-player-end')?.addEventListener('click', () => {
+            this.sendSinglePlayerDecision('end');
+            this.hideSinglePlayerDialog();
         });
 
         // 重置筹码按钮（使用弹窗进行范围/玩家/验证码选择）
         document.getElementById('reset-chips-btn')?.addEventListener('click', async () => {
             try {
                 return await this.openResetChipsDialog();
-                /* 简易交互：选择范围（已废弃，改用弹窗）
-                const scopeRaw = window.prompt('重置范围：输入 all（所有人）或 one（单人）', 'all');
-                if (!scopeRaw) return;
-                const scope = scopeRaw.trim().toLowerCase();
-                if (scope !== 'all' && scope !== 'one') {
-                    this.showToast('无效的范围，请输入 all 或 one', 'error');
-                    return;
-                }
-
-                let targetUserId = null;
-                if (scope === 'one') {
-                    // 拉取玩家列表，提示选择
-                    const data = await this.getRoomPlayers();
-                    const players = Array.isArray(data.players) ? data.players : [];
-                    if (players.length === 0) {
-                        this.showToast('暂无玩家可选', 'warning');
-                        return;
-                    }
-                    const listText = players.map(p => `${p.nickname} (${p.user_id})`).join('\n');
-                    const input = window.prompt(`选择要重置的玩家，输入其 user_id：
-${listText}`, players[0].user_id);
-                    if (!input) return;
-                    targetUserId = input.trim();
-                    if (!players.some(p => p.user_id === targetUserId)) {
-                        this.showToast('未找到该 user_id 对应玩家', 'error');
-                        return;
-                    }
-                }
-
-                // 输入验证码
-                const code = window.prompt('请输入验证码', '');
-                if (!code) return;
-
-                // 调用后端
-                const resp = await fetch('/api/reset-chips', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        scope,
-                        user_id: targetUserId,
-                        code
-                    })
-                });
-                if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    this.showToast(err.detail || '重置失败', 'error');
-                    return;
-                }
-                const js = await resp.json();
-                // 即时刷新本地显示
-                await this.updateRoomPlayers();
-                if (js.scope === 'all') {
-                    this.showToast(`已重置所有人筹码为默认值`, 'success');
-                } else {
-                    this.showToast(`已重置玩家筹码为默认值`, 'success');
-                }
-                */
             } catch (e) {
                 console.error('重置筹码失败：', e);
                 this.showToast('重置筹码失败，请重试', 'error');
             }
         });
+        
+        // 手动重连按钮
+        document.getElementById('reconnect-btn')?.addEventListener('click', () => {
+            this.manualReconnect();
+        });
+
         
         // 页面退出/隐藏时主动告知后端离开并关闭socket，避免僵尸连接
         const sendLeave = () => {
@@ -1463,6 +1746,7 @@ ${listText}`, players[0].user_id);
         return true;
     }
 
+
     updateGameStage(stage) {
         const stageEl = document.getElementById('game-stage');
         if (stageEl) {
@@ -1546,16 +1830,64 @@ ${listText}`, players[0].user_id);
 
 
 
+/**
+ * 仅按屏幕宽度等比例缩放牌桌容器 #table-stage，并居中显示
+ * 不改变内部元素尺寸/围坐布局；其他区域可自由调整
+ */
+function fitTableWidth() {
+    const stage = document.getElementById('table-stage');
+    if (!stage) return;
+    const baseWidth = 800; // 设计基准宽度
+    const vw = document.documentElement.clientWidth;
+    const padding = 24;    // 视口左右预留
+    const scale = Math.min(1, (vw - padding) / baseWidth);
+    stage.style.transformOrigin = 'center top';
+    stage.style.transform = `scale(${scale})`;
+    stage.style.marginLeft = 'auto';
+    stage.style.marginRight = 'auto';
+}
+
+function initTableWidthResponsive() {
+    fitTableWidth();
+    window.addEventListener('resize', fitTableWidth);
+    window.addEventListener('orientationchange', () => setTimeout(fitTableWidth, 200));
+}
+
 // 初始化游戏
 document.addEventListener('DOMContentLoaded', function() {
 
+    console.log('DOMContentLoaded事件触发，开始初始化游戏');
+    
     // 从页面模板中获取用户数据
     const userDataElement = document.getElementById('user-data');
+    console.log('userDataElement:', userDataElement);
+    
     if (userDataElement) {
-        const userData = JSON.parse(userDataElement.textContent);
-        window.pokerGame = new PokerGame(userData);
-        // 保持原尺寸显示（不缩放）
+        try {
+            const userData = JSON.parse(userDataElement.textContent);
+            console.log('用户数据:', userData);
+            
+            // 创建PokerGame实例
+            console.log('创建PokerGame实例...');
+            window.pokerGame = new PokerGame(userData);
+            console.log('PokerGame实例创建成功:', window.pokerGame);
+            
+            // 手机端：牌桌按屏幕宽度自适配并居中
+            initTableWidthResponsive();
+            // 进入房间后自动聚焦到牌桌区域（仅移动端）
+            try {
+                if (document.documentElement.clientWidth <= 768) {
+                    document.getElementById('table-stage')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            } catch (e) {}
+            
+            console.log('游戏初始化完成');
+        } catch (error) {
+            console.error('游戏初始化失败:', error);
+            window.location.href = '/';
+        }
     } else {
+        console.error('未找到user-data元素，重定向到首页');
         window.location.href = '/';
     }
 });
