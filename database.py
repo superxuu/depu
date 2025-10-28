@@ -108,12 +108,19 @@ class Database:
     
     def execute_query(self, query: str, params: tuple = ()) -> List[Dict[str, Any]]:
         """执行查询并返回结果列表"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        results = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        return results
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            results = [dict(row) for row in cursor.fetchall()]
+            return results
+        except sqlite3.Error as e:
+            print(f"数据库查询错误: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
     
     def execute_single(self, query: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
         """执行查询并返回单个结果"""
@@ -122,13 +129,22 @@ class Database:
     
     def execute_update(self, query: str, params: tuple = ()) -> int:
         """执行更新操作并返回影响的行数"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        conn.commit()
-        affected = cursor.rowcount
-        conn.close()
-        return affected
+        conn = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            conn.commit()
+            affected = cursor.rowcount
+            return affected
+        except sqlite3.Error as e:
+            print(f"数据库更新错误: {e}")
+            if conn:
+                conn.rollback()
+            return 0
+        finally:
+            if conn:
+                conn.close()
     
     def execute_insert(self, query: str, params: tuple = ()) -> int:
         """执行插入操作并返回最后插入的ID"""

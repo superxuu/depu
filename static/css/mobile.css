@@ -1,0 +1,58 @@
+/* 移动端（以牌桌为基准）适配样式 */
+@media (max-width: 768px) {
+  /* 仅保留核心区域：牌桌+玩家+按钮+摊牌浮层 */
+  .header, .game-header { display: none !important; }
+  .footer { display: none !important; }
+  .chat-section { display: none !important; }
+
+  /* 容器与主内容压缩边距，以牌桌为中心 */
+  .container, .main-content { padding: 0 !important; margin: 0 !important; }
+  .game-container {
+    max-width: 100vw !important;
+    padding: 8px !important;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* 以牌桌模块为基准：居中显示 */
+  .main-table-section {
+    align-items: center !important;
+    justify-content: flex-start !important;
+    margin: 0 auto !important;
+  }
+  #table-stage {
+    margin: 0 auto !important;
+    transform-origin: center top !important; /* 与现有JS缩放一致 */
+  }
+
+  /* 按钮区域保持底部固定（如已在 game.css 定义，这里仅兜底） */
+  .game-action-section {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    padding: max(10px, env(safe-area-inset-bottom) + 6px) 12px 12px;
+    background: rgba(20, 20, 20, 0.65);
+    backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    border-top: 1px solid rgba(255,255,255,0.12);
+  }
+
+  /* 摊牌浮层：已固定底部，这里确保覆盖 */
+  .showdown-overlay { z-index: 100000 !important; }
+  .showdown-dialog {
+    position: fixed !important;
+    bottom: env(safe-area-inset-bottom, 0px) !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    margin: 0 !important;
+    z-index: 100001 !important;
+  }
+}

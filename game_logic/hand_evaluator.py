@@ -165,7 +165,13 @@ class HandEvaluator:
     def _check_royal_flush(cards: List[Card]) -> Optional[List[Card]]:
         """检查皇家同花顺"""
         straight_flush = HandEvaluator._check_straight_flush(cards)
-        if straight_flush and straight_flush[0].rank == 'A':
+        if not straight_flush:
+            return None
+        
+        # 检查是否是10-J-Q-K-A的同花顺
+        values = sorted([card.value for card in straight_flush], reverse=True)
+        # 皇家同花顺必须是A-K-Q-J-10
+        if values == [14, 13, 12, 11, 10]:
             return straight_flush
         return None
     
@@ -212,13 +218,28 @@ class HandEvaluator:
         for card in cards:
             rank_count[card.rank] = rank_count.get(card.rank, 0) + 1
         
-        three_ranks = [rank for rank, count in rank_count.items() if count >= 3]
-        pair_ranks = [rank for rank, count in rank_count.items() if count >= 2 and rank not in three_ranks]
+        # 按点数排序三条，选择最大的三条
+        three_ranks = sorted([rank for rank, count in rank_count.items() if count >= 3], 
+                           key=lambda x: max(card.value for card in cards if card.rank == x), reverse=True)
         
-        if three_ranks and pair_ranks:
-            three_cards = [card for card in cards if card.rank == three_ranks[0]][:3]
-            pair_cards = [card for card in cards if card.rank == pair_ranks[0]][:2]
-            return three_cards + pair_cards
+        # 如果有三条，找对子
+        if three_ranks:
+            best_three = three_ranks[0]
+            # 找出不是三条的对子
+            pair_ranks = []
+            for rank, count in rank_count.items():
+                if rank != best_three and count >= 2:
+                    pair_ranks.append(rank)
+            
+            # 如果没有单独的对子，但有多个三条，用次大的三条做对子
+            if not pair_ranks and len(three_ranks) >= 2:
+                pair_ranks = [three_ranks[1]]
+            
+            if pair_ranks:
+                three_cards = [card for card in cards if card.rank == best_three][:3]
+                pair_cards = [card for card in cards if card.rank == pair_ranks[0]][:2]
+                return three_cards + pair_cards
+        
         return None
     
     @staticmethod
@@ -243,27 +264,38 @@ class HandEvaluator:
         # 转换点数并去重排序
         values = sorted(set(card.value for card in cards), reverse=True)
         
-        # 检查A-5顺子（A作为1）
-        if 14 in values:  # A
-            low_values = values + [1]  # 添加A作为1的情况
-            low_values.sort(reverse=True)
-        else:
-            low_values = values
-        
-        # 查找连续5个点数
-        for i in range(len(low_values) - 4):
-            if low_values[i] - low_values[i+4] == 4:
+        # 先检查普通顺子（A作为14）
+        for i in range(len(values) - 4):
+            if values[i] - values[i+4] == 4:
                 # 找到顺子，获取对应的牌
-                straight_values = set(low_values[i:i+5])
+                straight_values = values[i:i+5]
                 straight_cards = []
-                for value in sorted(straight_values, reverse=True):
+                for value in straight_values:
                     # 取该点数值最高的牌
                     card_for_value = max([card for card in cards if card.value == value], 
                                         key=lambda x: x.value)
                     straight_cards.append(card_for_value)
-                    if len(straight_cards) == 5:
-                        break
-                return straight_cards[:5]
+                return straight_cards
+        
+        # 检查A-5特殊顺子（A作为1）
+        if 14 in values:  # 有A
+            # 创建A作为1的值列表
+            low_ace_values = [v if v != 14 else 1 for v in values]
+            low_ace_values = sorted(set(low_ace_values), reverse=True)
+            
+            # 检查5-4-3-2-A顺子
+            for i in range(len(low_ace_values) - 4):
+                if low_ace_values[i] - low_ace_values[i+4] == 4:
+                    if low_ace_values[i] == 5 and low_ace_values[i+4] == 1:  # 确认是5-4-3-2-A
+                        # 获取对应的牌（A作为1，但实际牌值是14）
+                        straight_values = [5, 4, 3, 2, 14]
+                        straight_cards = []
+                        for value in straight_values:
+                            # 取该点数值最高的牌
+                            card_for_value = max([card for card in cards if card.value == value], 
+                                                key=lambda x: x.value)
+                            straight_cards.append(card_for_value)
+                        return straight_cards
         return None
     
     @staticmethod
@@ -340,13 +372,17 @@ class HandEvaluator:
     @staticmethod
     def _compare_same_hand_type(hand1: Dict, hand2: Dict) -> int:
         """比较同类型牌型的强度"""
-        # 简化实现：比较主要牌的点数
         cards1 = hand1["cards"]
         cards2 = hand2["cards"]
         
-        for card1, card2 in zip(cards1, cards2):
-            if card1.value > card2.value:
+        # 按点数降序排列
+        values1 = sorted([card.value for card in cards1], reverse=True)
+        values2 = sorted([card.value for card in cards2], reverse=True)
+        
+        # 逐个比较点数
+        for v1, v2 in zip(values1, values2):
+            if v1 > v2:
                 return 1
-            elif card1.value < card2.value:
+            elif v1 < v2:
                 return -1
         return 0

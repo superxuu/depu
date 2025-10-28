@@ -7,7 +7,7 @@
 
 <div class="game-container">
     <div class="game-header">
-        <h2>AI扑克训练房间: {{ room.room_name }}</h2>
+        <h2>AI训练房间: {{ room.room_name }}</h2>
         <div class="game-info">
             <span id="game-stage">等待开始</span>
             <span id="pot-size">底池: 0</span>
@@ -47,6 +47,7 @@
                         <button id="unready-btn" class="action-btn btn-secondary" style="display: none;">取消准备</button>
                         <button id="refresh-room-btn" class="action-btn btn-info" title="主动刷新房间玩家列表">刷新房间玩家</button>
                         <button id="reset-chips-btn" class="action-btn btn-warning" title="仅在未开局时可用">重置筹码</button>
+                        <button id="reconnect-btn" class="action-btn btn-primary" style="display: none;" title="手动重连">重新连接</button>
                     </div>
                     
                     <!-- 游戏操作按钮（游戏开始时显示） -->
@@ -54,9 +55,11 @@
                         <button id="fold-btn" class="action-btn btn-danger">弃牌</button>
                         <button id="check-btn" class="action-btn btn-secondary">过牌</button>
                         <button id="call-btn" class="action-btn btn-primary">跟注</button>
+                        <button id="allin-btn" class="action-btn btn-warning">全下</button>
                         
                         <div class="raise-section">
-                            <input type="number" id="raise-amount" placeholder="加注金额" min="0">
+                            <input type="number" id="raise-amount" placeholder="加到的总注（raise-to）" min="0">
+                            <span id="min-increment-hint" style="margin-left:8px;color:#fff;opacity:0.9;font-size:14px;"></span>
                             <button id="raise-btn" class="action-btn btn-warning">加注</button>
                         </div>
                     </div>
@@ -89,6 +92,22 @@
   </div>
 </div>
 
+<!-- 单玩家弹窗结构 -->
+<div class="single-player-overlay" id="single-player-overlay">
+  <div class="single-player-dialog">
+    <div class="single-player-title">仅剩您一名玩家</div>
+    <div class="single-player-content">
+      <p>其他玩家已离开游戏，您想如何处理？</p>
+      <p class="single-player-hint">15秒后自动结束游戏</p>
+    </div>
+    <div class="single-player-actions">
+      <button class="single-player-btn single-player-btn-primary" id="single-player-continue">继续等待</button>
+      <button class="single-player-btn single-player-btn-danger" id="single-player-end">结束游戏</button>
+    </div>
+  </div>
+</div>
+
+
 <script src="{{ url_for('static', path='js/game.js') }}?v=1.5"></script>
 <script>
     // 极简认证 - 只使用cookie（符合技术方案）
@@ -109,9 +128,27 @@
             }
         }, 100);
     }
+    
+    // 添加详细的调试信息
+    console.log('游戏页面加载完成，检查DOM元素:');
+    console.log('ready-btn元素:', document.getElementById('ready-btn'));
+    console.log('unready-btn元素:', document.getElementById('unready-btn'));
+    console.log('players-container元素:', document.getElementById('players-container'));
+    console.log('user数据:', document.getElementById('user-data')?.textContent);
+    
+    // 检查WebSocket连接状态
+    setTimeout(() => {
+        if (window.game && window.game.socket) {
+            console.log('WebSocket连接状态:', window.game.socket.readyState);
+            console.log('WebSocket URL:', window.game.socket.url);
+        } else {
+            console.log('WebSocket未初始化或game对象不存在');
+        }
+    }, 2000);
 </script>
 {% endblock %}
 
 {% block styles %}
 <link rel="stylesheet" href="{{ url_for('static', path='css/game.css') }}?v=1.4">
+<link rel="stylesheet" href="{{ url_for('static', path='css/mobile.css') }}?v=1.0">
 {% endblock %}

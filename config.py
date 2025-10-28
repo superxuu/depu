@@ -13,7 +13,7 @@ class Settings:
     # 游戏配置
     DEFAULT_CHIPS = 1000
     MIN_BET = 5
-    MAX_PLAYERS = 6
+    MAX_PLAYERS = 10  # 国际德扑标准最大10人桌
     
     # 安全配置
     SECRET_KEY = os.getenv("POKER_SECRET_KEY", "dev-secret-key-change-in-production")

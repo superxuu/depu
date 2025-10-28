@@ -62,6 +62,9 @@ class Player:
         """重置回合状态"""
         self.current_bet = 0
         self.is_folded = False
+        # 确保活跃状态正确（除非玩家被明确移除，否则保持活跃）
+        if not self.is_active:
+            self.is_active = True
     
     def reset_game(self) -> None:
         """重置游戏状态"""
@@ -71,6 +74,8 @@ class Player:
         # 记录本手牌起始筹码并重置胜负标记
         self.starting_chips = self.chips
         self.win = False
+        # 重置操作记录
+        self.last_action = ''
     
     def evaluate_hand(self, community_cards: List[Card]) -> Dict[str, Any]:
         """评估手牌强度"""
@@ -82,7 +87,7 @@ class Player:
     
     def is_all_in(self) -> bool:
         """检查是否全下"""
-        return self.chips == 0 and not self.is_folded
+        return self.chips == 0 and not self.is_folded and self.is_active
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式（用于序列化）"""
@@ -165,7 +170,13 @@ class PlayerManager:
     
     def get_next_player(self, current_position: int) -> Optional[Player]:
         """获取下一个玩家"""
+        # 首先尝试获取正在游戏的玩家（未全下）
         active_players = self.get_playing_players()
+        
+        # 如果没有正在游戏的玩家（例如所有玩家都全下或弃牌），则获取所有活跃玩家
+        if not active_players:
+            active_players = self.get_active_players()
+            
         if not active_players:
             return None
         
@@ -179,6 +190,7 @@ class PlayerManager:
                 current_index = i
                 break
         
+        # 如果找不到当前玩家位置，返回列表中的第一个玩家
         if current_index is None:
             return active_players[0]
         

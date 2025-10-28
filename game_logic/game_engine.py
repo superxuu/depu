@@ -19,7 +19,7 @@ class GameStage(Enum):
 class TexasHoldemGame:
     """德州扑克游戏引擎"""
     
-    def __init__(self, min_bet: int = 10, max_players: int = 9):
+    def __init__(self, min_bet: int = 10, max_players: int = 10):
         self.min_bet = min_bet
         self.max_players = max_players
         self.deck = Deck()
@@ -43,6 +43,13 @@ class TexasHoldemGame:
         self.last_aggressor_user_id: Optional[str] = None
         # 摊牌阶段公开的玩家手牌
         self.showdown_reveal: List[Dict[str, Any]] = []
+        # 玩家连接状态追踪
+        self.connected_players: Set[str] = set()  # 在线玩家user_id集合
+        self.disconnected_players: Set[str] = set()  # 已断开连接的玩家user_id集合
+        self.spectating_players: Set[str] = set()  # 旁观玩家user_id集合（本轮不参与结算）
+        # 仅剩一名在线活跃玩家时的等待提示状态
+        self.single_player_waiting: Optional[Dict[str, Any]] = None
+        self.single_player_grace_period: int = 15  # 秒
     
     def add_player(self, user_id: str, nickname: str, chips: int, position: int) -> bool:
         """添加玩家"""
@@ -56,7 +63,71 @@ class TexasHoldemGame:
         
         player = Player(user_id, nickname, chips, position)
         self.player_manager.add_player(player)
+        # 标记为在线玩家
+        self.connected_players.add(user_id)
         return True
+    
+    def set_player_connected(self, user_id: str) -> None:
+        """设置玩家为在线状态"""
+        self.connected_players.add(user_id)
+        self.disconnected_players.discard(user_id)
+    
+    def set_player_disconnected(self, user_id: str) -> None:
+        """设置玩家为离线状态"""
+        self.connected_players.discard(user_id)
+        self.disconnected_players.add(user_id)
+        
+        # 如果游戏进行中，检查是否为单玩家场景
+        if self.stage != GameStage.ENDED and user_id not in self.spectating_players:
+            # 先计算剩余在线玩家（不包括刚离线的这个）
+            online_active_count = len([p for p in self.player_manager.get_active_players() 
+                                     if p.user_id in self.connected_players and 
+                                     p.user_id not in self.spectating_players])
+            
+            print(f"玩家 {user_id} 离线，剩余在线活跃玩家数: {online_active_count}")
+            
+            # 如果只剩1个在线活跃玩家（排除刚离线的），不再自动弃牌，等待后端超时检查
+            if online_active_count == 1:
+                print(f"玩家 {user_id} 离线，检测到只剩1个活跃玩家，等待超时检查")
+                # 不自动弃牌离线玩家，让超时检查任务处理
+                return
+            
+            # 多人游戏时（≥3人），离线玩家立即自动弃牌
+            print(f"玩家 {user_id} 离线，多人游戏（剩余在线≥2人），自动弃牌")
+            player = self.player_manager.get_player(user_id)
+            if player and not player.is_folded:
+                self.spectating_players.add(user_id)
+                # 玩家自动弃牌，但不参与本轮结算
+                player.fold()
+    
+    def get_player_connection_status(self, user_id: str) -> str:
+        """获取玩家连接状态：online/offline"""
+        if user_id in self.connected_players:
+            return "online"
+        elif user_id in self.disconnected_players:
+            return "offline"
+        else:
+            return "unknown"
+    
+    def is_player_connected(self, user_id: str) -> bool:
+        """检查玩家是否在线"""
+        return user_id in self.connected_players
+    
+    def get_online_active_players(self) -> List[Player]:
+        """获取在线且仍在游戏的玩家"""
+        return [p for p in self.player_manager.get_active_players() 
+                if p.user_id in self.connected_players and p.user_id not in self.spectating_players]
+    
+    def handle_player_reconnect(self, user_id: str) -> None:
+        """处理玩家重连逻辑"""
+        # 设置玩家为在线状态
+        self.set_player_connected(user_id)
+        
+        # 如果当前处于单玩家等待状态，且重连的玩家是等待中的玩家，清除等待状态
+        if (self.single_player_waiting and 
+            self.single_player_waiting["user_id"] == user_id):
+            print(f"玩家 {user_id} 重连，清除单玩家等待状态")
+            self.single_player_waiting = None
     
     def remove_player(self, user_id: str) -> bool:
         """移除玩家"""
@@ -73,8 +144,21 @@ class TexasHoldemGame:
     
     def start_game(self) -> bool:
         """开始新游戏"""
-        if len(self.player_manager.get_active_players()) < 2:
+        print("开始检查游戏开始条件...")
+        
+        # 只检查在线且非旁观的活跃玩家
+        active_players = self.get_online_active_players()
+        print(f"在线活跃玩家: {[p.nickname for p in active_players]}")
+        
+        if len(active_players) < 2:
+            print(f"游戏开始失败：在线活跃玩家不足2人，当前只有{len(active_players)}人")
             return False  # 至少需要2名玩家
+        
+        # 检查是否有玩家筹码不足以支付大盲注
+        for player in active_players:
+            if player.chips < self.min_bet:
+                print(f"游戏开始失败：玩家 {player.nickname} 筹码不足，需要{self.min_bet}，当前只有{player.chips}")
+                return False  # 筹码不足以支付大盲注
         
         # 重置游戏状态
         self.deck.reset()
@@ -86,6 +170,9 @@ class TexasHoldemGame:
         self.winner = None
         # 重置摊牌公开列表
         self.showdown_reveal = []
+        
+        # 重置旁观状态（新游戏开始时清空旁观列表）
+        self.spectating_players.clear()
         
         # 重置玩家状态
         self.player_manager.reset_game()
@@ -161,7 +248,9 @@ class TexasHoldemGame:
                         big_blind_player.last_action = 'bb'
                         self.pot += actual
                         self.current_bet = max(self.current_bet, actual)
-                        self.last_raise_increment = max(self.last_raise_increment, actual)
+                        # BB全下时，最低加注增量仍为大盲注额（不是全下金额）
+                        if self.last_raise_increment == 0:
+                            self.last_raise_increment = self.min_bet
     
     def _set_initial_player(self) -> None:
         """设置本街首个行动位：
@@ -172,6 +261,14 @@ class TexasHoldemGame:
         """
         active_players = self.player_manager.get_active_players()
         if not active_players:
+            self.current_player_position = None
+            self.first_to_act_position = None
+            return
+        
+        # 检查是否还有需要操作的玩家（未全下）
+        playing_players = [p for p in active_players if not p.is_all_in()]
+        if not playing_players:
+            # 所有玩家都已ALL IN，无需设置当前玩家
             self.current_player_position = None
             self.first_to_act_position = None
             return
@@ -223,26 +320,55 @@ class TexasHoldemGame:
     
     def next_stage(self) -> bool:
         """进入下一阶段"""
+        print(f"DEBUG: next_stage - 当前阶段: {self.stage}")
+        
+        # 检查是否还有需要操作的玩家
+        playing_players = [p for p in self.player_manager.get_active_players() if not p.is_all_in()]
+        
         if self.stage == GameStage.PREFLOP:
             # 发翻牌
             self._deal_flop()
             self.stage = GameStage.FLOP
+            print(f"DEBUG: next_stage - 进入翻牌阶段")
         elif self.stage == GameStage.FLOP:
             # 发转牌
             self._deal_turn()
             self.stage = GameStage.TURN
+            print(f"DEBUG: next_stage - 进入转牌阶段")
         elif self.stage == GameStage.TURN:
             # 发河牌
             self._deal_river()
             self.stage = GameStage.RIVER
+            print(f"DEBUG: next_stage - 进入河牌阶段")
         elif self.stage == GameStage.RIVER:
             # 进入摊牌
             self.stage = GameStage.SHOWDOWN
+            print(f"DEBUG: next_stage - 进入摊牌阶段")
             return self._determine_winner()
         elif self.stage == GameStage.SHOWDOWN:
             # 游戏结束
             self.stage = GameStage.ENDED
+            print(f"DEBUG: next_stage - 游戏结束")
             return True
+        
+        # 如果所有玩家都已ALL IN，自动发完剩余牌并摊牌
+        if not playing_players:
+            print(f"DEBUG: next_stage - 所有玩家ALL IN，自动发完剩余牌")
+            # 自动推进到河牌，然后摊牌
+            while self.stage != GameStage.RIVER:
+                if self.stage == GameStage.PREFLOP:
+                    self._deal_flop()
+                    self.stage = GameStage.FLOP
+                elif self.stage == GameStage.FLOP:
+                    self._deal_turn()
+                    self.stage = GameStage.TURN
+                elif self.stage == GameStage.TURN:
+                    self._deal_river()
+                    self.stage = GameStage.RIVER
+            
+            # 到达河牌后直接摊牌
+            self.stage = GameStage.SHOWDOWN
+            return self._determine_winner()
         
         # 重置下注状态
         self._reset_betting_round()
@@ -274,14 +400,17 @@ class TexasHoldemGame:
         # 重置玩家当前下注额
         for player in self.player_manager.players:
             player.current_bet = 0
-            # 新一轮下注开始时清空上轮“最近一次操作”标记
+            # 新一轮下注开始时清空上轮"最近一次操作"标记
             player.last_action = ''
         
         self.current_bet = 0
+        # 新回合：最小加注增量重置为大盲额（min_bet），符合德扑规则
+        self.last_raise_increment = self.min_bet
         # 重置本街行动记录
         self.acted_positions = set()
         # 设置当前玩家为庄家后面的第一个玩家
         self._set_initial_player()
+        print(f"DEBUG: _reset_betting_round - 设置当前玩家为 {self.current_player_position}")
     
     def player_action(self, user_id: str, action: str, amount: int = 0) -> Dict[str, Any]:
         """处理玩家操作"""
@@ -298,10 +427,14 @@ class TexasHoldemGame:
             # 若即时结算已结束整手牌，则不再推进或轮转
             if self.stage == GameStage.ENDED:
                 return result
-            # 回合结束判定：若应结束则直接进入下一阶段，否则轮到下一位
-            if self._should_advance_stage():
+            should_advance = self._should_advance_stage()
+            if self.single_player_waiting:
+                print("DEBUG: player_action - 单玩家等待中，暂停推进")
+            elif should_advance:
+                print("DEBUG: player_action - 调用 next_stage()")
                 self.next_stage()
             else:
+                print("DEBUG: player_action - 调用 _move_to_next_player()")
                 self._move_to_next_player()
         
         return result
@@ -318,12 +451,21 @@ class TexasHoldemGame:
             return {"success": True, "message": "弃牌成功"}
         
         elif action == "check":
+            print(f"DEBUG: 玩家 {player.position} 尝试过牌")
+            print(f"DEBUG: 玩家状态 - is_all_in: {player.is_all_in()}, is_folded: {player.is_folded}")
+            print(f"DEBUG: 玩家当前下注: {player.current_bet}, 台面当前下注: {self.current_bet}")
+            
             if player.current_bet < self.current_bet:
+                print("DEBUG: 过牌失败，必须跟注或加注")
                 return {"success": False, "message": "必须跟注或加注"}
             player.check()
             # 记录行动（仅仍需表态者）
-            if not player.is_all_in and not player.is_folded:
+            if not player.is_all_in() and not player.is_folded:
+                print(f"DEBUG: 玩家 {player.position} 过牌，添加到 acted_positions")
                 self.acted_positions.add(player.position)
+                print(f"DEBUG: 过牌后 acted_positions={self.acted_positions}")
+            else:
+                print(f"DEBUG: 玩家 {player.position} 未添加到 acted_positions，因为 is_all_in={player.is_all_in()}, is_folded={player.is_folded}")
             # 过牌后若只剩一人未弃牌，立即结算
             self._check_instant_win()
             return {"success": True, "message": "过牌成功"}
@@ -346,7 +488,7 @@ class TexasHoldemGame:
             player.call(self.current_bet)
             self.pot += call_amount
             # 记录行动（仅仍需表态者）
-            if not player.is_all_in and not player.is_folded:
+            if not player.is_all_in() and not player.is_folded:
                 self.acted_positions.add(player.position)
             # 实时更新边池概览
             self._update_side_pots_snapshot()
@@ -362,22 +504,22 @@ class TexasHoldemGame:
             if not player.can_afford(raise_amount):
                 return {"success": False, "message": "筹码不足"}
             
-            # 最低加注增量校验（All-in可放宽）
+            # 最低加注增量校验
             increment = amount - self.current_bet
-            if player.chips >= raise_amount and self.last_raise_increment > 0 and increment < self.last_raise_increment:
-                return {"success": False, "message": "加注增量不足"}
+            is_all_in = (raise_amount >= player.chips)
+            
+            # 如果不是全下，必须满足最低加注增量
+            if not is_all_in and self.last_raise_increment > 0 and increment < self.last_raise_increment:
+                return {"success": False, "message": f"加注增量不足，最少加注{self.last_raise_increment}"}
             
             player.raise_bet(raise_amount)
             self.pot += raise_amount
             # 更新当前台面总注与最低加注增量
             self.current_bet = amount
-            # 全下（raise_amount 等于剩余筹码）小于最低增量允许，但不重开行动；否则更新最低增量
-            if player.chips == 0 and increment < self.last_raise_increment:
-                # 不更新 last_raise_increment（不重开行动）
-                pass
-            else:
+            # 只有足额加注才更新最低增量，全下不更新
+            if not is_all_in:
                 self.last_raise_increment = increment
-            # 加注后重置“已行动”集合，仅保留加注者（其他人需重新表态）
+            # 加注后重置"已行动"集合，仅保留加注者（其他人需重新表态）
             self.acted_positions = {player.position}
             # 记录最后主动者（用于亮牌规则提示）
             self.last_aggressor_user_id = player.user_id
@@ -406,18 +548,53 @@ class TexasHoldemGame:
     
     def _should_advance_stage(self) -> bool:
         """判断是否应结束当前下注回合并进入下一阶段"""
-        # 仅统计仍在玩的非全下玩家（需要继续表态的）
-        still_needs_action = [p for p in self.player_manager.get_active_players() if not p.is_all_in()]
+        # 检查是否只剩1人在线，如果是则进入单玩家等待状态
+        online_active_players = self.get_online_active_players()
+        if len(online_active_players) <= 1 and self.stage != GameStage.ENDED and not self.single_player_waiting:
+            self._check_single_player_and_wait()
+            return False  # 等待用户决定，不立即推进
+        
+        active_players = self.player_manager.get_active_players()
+        if not active_players:
+            return True
+        
+        # 统计仍需表态的玩家（未弃牌且未全下且在线）
+        still_needs_action = [p for p in active_players 
+                            if not p.is_all_in() and 
+                            p.user_id in self.connected_players and 
+                            p.user_id not in self.spectating_players]
+        
+        # 如果没有需要表态的玩家（全部全下、弃牌、离线或旁观），直接进入下一阶段
         if not still_needs_action:
             return True
-        # 若有下注：所有仍需表态的玩家 current_bet 必须匹配到当前注
+        
+        # 如果有下注，检查所有仍需表态的玩家是否都已跟注到当前注
         if self.current_bet > 0:
             for p in still_needs_action:
                 if p.current_bet < self.current_bet:
-                    return False
+                    return False  # 还有玩家需要跟注
+            return True  # 所有玩家都已跟注
+        
+        # 如果没有下注（过牌情况），检查是否所有需要表态的玩家都已行动过
+        # 并且当前玩家已经回到了first_to_act_position，表示完成了一整轮
+        
+        # 添加调试日志
+        print(f"DEBUG: acted_positions={self.acted_positions}, still_needs_action={[p.position for p in still_needs_action]}")
+        print(f"DEBUG: current_player_position={self.current_player_position}, first_to_act_position={self.first_to_act_position}")
+        
+        # 获取所有需要表态的玩家的位置
+        still_needs_action_positions = {p.position for p in still_needs_action}
+        
+        # 检查是否所有需要表态的玩家都已经行动过
+        all_acted = still_needs_action_positions.issubset(self.acted_positions)
+        
+        # 所有仍需表态的玩家都已行动（全部过牌），立即推进到下一阶段
+        if all_acted:
+            print("DEBUG: 所有需要表态的玩家都已行动（全部过牌），推进阶段")
             return True
-        # 无下注：所有仍需表态的玩家都至少行动过一次（check）
-        return len(self.acted_positions) >= len(still_needs_action)
+        
+        # 如果还没有玩家行动，或者行动玩家数不足，不推进阶段
+        return False
     
     def _seat_order_from_dealer_left(self) -> List[int]:
         """返回从庄家左侧开始的座位顺序（位置号列表），用于odd chip分配排序"""
@@ -438,42 +615,147 @@ class TexasHoldemGame:
         return ordered
     
     def _move_to_next_player(self) -> None:
-        """移动到下一个玩家"""
+        """移动到下一个玩家，跳过离线玩家"""
+        print("DEBUG: _move_to_next_player - 开始执行")
+        
+        # 检查是否只剩1人在线，如果是则进入单玩家等待状态
+        online_active_players = self.get_online_active_players()
+        if len(online_active_players) <= 1 and self.stage != GameStage.ENDED and not self.single_player_waiting:
+            self._check_single_player_and_wait()
+            return
+        
         # 若当前玩家位置未知，无法推进到下一位（避免向 get_next_player 传入 None）
         if self.current_player_position is None:
+            print("DEBUG: 当前玩家位置为None，无法推进到下一位")
             return
-        next_player = self.player_manager.get_next_player(self.current_player_position)
-        if next_player:
+        
+        max_attempts = len(self.player_manager.players)  # 防止无限循环
+        attempts = 0
+        
+        while attempts < max_attempts:
+            next_player = self.player_manager.get_next_player(self.current_player_position)
+            if not next_player:
+                # 没有更多玩家，设置当前玩家为None
+                print("DEBUG: _move_to_next_player - 没有更多玩家，设置current_player_position为None")
+                self.current_player_position = None
+                return
+            
+            # 检查下一个玩家是否在线且不是旁观状态
+            if (next_player.user_id in self.connected_players and 
+                next_player.user_id not in self.spectating_players):
+                print(f"DEBUG: _move_to_next_player - 移动到下一个玩家 {next_player.position}")
+                self.current_player_position = next_player.position
+                return
+            
+            # 如果下一个玩家离线或旁观，跳过他们并继续寻找
+            if next_player.user_id not in self.connected_players:
+                # 玩家离线，自动弃牌并设为旁观
+                self.set_player_disconnected(next_player.user_id)
+            
             self.current_player_position = next_player.position
-        else:
-            # 没有更多玩家，进入下一阶段
-            self.next_stage()
+            attempts += 1
+        
+        # 如果找不到合适的下一个玩家，设置当前玩家为None
+        print("DEBUG: _move_to_next_player - 找不到合适的下一个玩家，设置current_player_position为None")
+        self.current_player_position = None
+    
+    def _terminate_game_insufficient_players(self) -> None:
+        """因玩家不足终止游戏"""
+        # 游戏终止，不进行结算
+        self.stage = GameStage.ENDED
+        self.winner = None
+        self.current_player_position = None
+        self.first_to_act_position = None
+        
+        # 清空底池（本轮不结算）
+        self.pot = 0
+        self.side_pots = []
+        
+        # 重置所有玩家状态但保留筹码
+        for player in self.player_manager.players:
+            player.reset_round()
+            player.current_bet = 0
+            player.total_bet = 0
+    
+    def _check_single_player_and_wait(self) -> None:
+        """检查是否为单玩家场景，如果是则设置等待状态"""
+        online_active_players = self.get_online_active_players()
+        if len(online_active_players) == 1 and not self.single_player_waiting:
+            # 获取唯一的在线玩家
+            remaining_player = online_active_players[0]
+            print(f"检测到只剩一个玩家: {remaining_player.nickname}，进入等待状态")
+            
+            # 设置等待状态
+            self.single_player_waiting = {
+                "user_id": remaining_player.user_id,
+                "start_time": time.time(),
+                "confirmed": False
+            }
+    
+    def handle_single_player_decision(self, user_id: str, decision: str) -> bool:
+        """处理单玩家的决定（继续/结束游戏）"""
+        if not self.single_player_waiting or self.single_player_waiting["user_id"] != user_id:
+            return False
+        
+        if decision == "continue":
+            # 玩家选择继续，清除等待状态
+            self.single_player_waiting = None
+            return True
+        elif decision == "end":
+            # 玩家选择结束，终止游戏
+            self.single_player_waiting = None
+            self._terminate_game_insufficient_players()
+            return True
+        
+        return False
     
     def _build_side_pots(self) -> List[Dict[str, Any]]:
         """
-        基于各玩家的总投入（total_bet）与弃牌状态，构建主池与边池：
-        - 以所有未弃牌玩家的 total_bet 作为贡献上限，按升序形成若干cap层
-        - 每层池的金额 = (cap_i - cap_{i-1}) * 该层资格玩家数（资格：total_bet >= cap_i 且未弃牌）
+        构建主池与边池：
+        - 按玩家投入金额分层，每层独立的池
+        - 简化逻辑：只按实际投入金额分层
         """
         # 仅考虑未弃牌玩家的投入
         active_players = [p for p in self.player_manager.players if not p.is_folded]
         if not active_players:
+            self.side_pots = []
             return []
-        caps = sorted(set(max(0, p.total_bet) for p in active_players))
+        
+        # 获取所有不同的投入金额并排序
+        bet_amounts = sorted(set(p.total_bet for p in active_players if p.total_bet > 0))
+        if not bet_amounts:
+            self.side_pots = []
+            return []
+        
         pots: List[Dict[str, Any]] = []
-        prev = 0
-        for cap in caps:
-            if cap <= prev:
-                continue
-            eligible = [p for p in active_players if p.total_bet >= cap]
+        prev_amount = 0
+        
+        for amount in bet_amounts:
+            # 找出投入至少为当前金额的玩家
+            eligible = [p for p in active_players if p.total_bet >= amount]
             if not eligible:
-                prev = cap
                 continue
-            amount = (cap - prev) * len(eligible)
-            pots.append({"cap": cap, "amount": amount, "eligible": eligible})
-            prev = cap
-        # 记录到状态，便于前端显示
-        self.side_pots = [{"cap": pot["cap"], "amount": pot["amount"], "eligible_count": len(pot["eligible"])} for pot in pots]
+            
+            # 计算这一层的池金额
+            layer_amount = (amount - prev_amount) * len(eligible)
+            if layer_amount > 0:
+                pots.append({
+                    "cap": amount,
+                    "amount": layer_amount,
+                    "eligible": eligible
+                })
+            prev_amount = amount
+        
+        # 更新边池状态（用于前端显示）
+        self.side_pots = [
+            {
+                "cap": pot["cap"], 
+                "amount": pot["amount"], 
+                "eligible_count": len(pot["eligible"])
+            } 
+            for pot in pots
+        ]
+        
         return pots
     
     def voluntary_reveal(self, user_id: str) -> bool:
@@ -499,12 +781,20 @@ class TexasHoldemGame:
 
     def _determine_winner(self) -> bool:
         """确定赢家并分配筹码"""
-        active_players = self.player_manager.get_active_players()
+        # 只考虑在线且非旁观的活跃玩家
+        active_players = [p for p in self.player_manager.get_active_players() 
+                        if p.user_id in self.connected_players and 
+                        p.user_id not in self.spectating_players]
+        
         # 重置本手牌胜利标记
         for p in self.player_manager.players:
             p.win = False
+            
         if not active_players:
+            # 没有符合条件的玩家，游戏结束但不结算
+            self.stage = GameStage.ENDED
             return False
+            
         # 如果只剩一个玩家，直接获胜
         if len(active_players) == 1:
             winner_player = active_players[0]
@@ -515,18 +805,20 @@ class TexasHoldemGame:
             self.stage = GameStage.ENDED
             return True
         
-        # 摊牌需公开仍在局内玩家的手牌
+        # 摊牌需公开在线且非旁观玩家的手牌
+        all_active_players = self.player_manager.get_active_players()
         self.showdown_reveal = [
             {
                 "user_id": p.user_id,
                 "nickname": p.nickname,
                 "position": p.position,
-                "hole_cards": [card.to_dict() for card in p.hole_cards]
+                "hole_cards": [card.to_dict() for card in p.hole_cards],
+                "is_spectating": p.user_id in self.spectating_players
             }
-            for p in active_players
+            for p in all_active_players
         ]
         
-        # 评估所有玩家的手牌
+        # 只评估在线且非旁观玩家的手牌
         player_hands = []
         for player in active_players:
             hand_evaluation = player.evaluate_hand(self.community_cards)
@@ -591,14 +883,18 @@ class TexasHoldemGame:
                     winners_pool = [evals[i]]
                 elif cmp == 0:
                     winners_pool.append(evals[i])
-            # 均分该池并按庄家左侧顺序分配 odd chip
+            # 均分该池并按庄家左侧顺序分配 odd chip（符合国际规则）
             share = pot["amount"] // len(winners_pool)
             rem = pot["amount"] % len(winners_pool)
             ordered_positions = self._seat_order_from_dealer_left()
-            ordered_winners = sorted(winners_pool, key=lambda w: ordered_positions.index(w["player"].position))
+            ordered_winners = sorted(
+                winners_pool,
+                key=lambda w: ordered_positions.index(w["player"].position)
+            )
             for w in ordered_winners:
                 w["player"].chips += share
                 w["player"].win = True
+            # odd chip分配：从庄家左侧开始，依次分配给赢家
             for i in range(rem):
                 ordered_winners[i]["player"].chips += 1
             if idx == len(pots) - 1:
@@ -618,6 +914,16 @@ class TexasHoldemGame:
             if cp:
                 current_player_id = cp.user_id
 
+        # 计算剩余超时时间
+        time_remaining = max(0, self.action_timeout - (time.time() - self.last_action_time))
+
+        # 为每个玩家添加连接状态
+        players_with_status = []
+        for player_dict in self.player_manager.to_dict_list():
+            player_dict_copy = player_dict.copy()
+            player_dict_copy["connection_status"] = self.get_player_connection_status(player_dict["user_id"])
+            players_with_status.append(player_dict_copy)
+
         return {
             "stage": self.stage.value,  # 小写阶段字符串，便于前端渲染
             "community_cards": [card.to_dict() for card in self.community_cards],
@@ -628,11 +934,18 @@ class TexasHoldemGame:
             "current_player": self.current_player_position,            # 位置号（向后兼容）
             "current_player_position": self.current_player_position,   # 位置号（显式）
             "current_player_id": current_player_id,                    # user_id（前端直接使用）
-            "players": self.player_manager.to_dict_list(),
+            "players": players_with_status,
             "winner": self.winner.to_dict() if self.winner else None,
             "side_pots": self.side_pots,
+            "last_raise_increment": self.last_raise_increment,
             "last_aggressor": self.last_aggressor_user_id,
-            "showdown_reveal": self.showdown_reveal
+            "showdown_reveal": self.showdown_reveal,
+            # 超时相关信息
+            "action_timeout": self.action_timeout,  # 总超时时间（秒）
+            "time_remaining": time_remaining,      # 剩余时间（秒）
+            "is_timeout": self.is_action_timeout(),  # 是否已超时
+            # 单玩家等待状态
+            "single_player_waiting": self.single_player_waiting
         }
     
     def is_action_timeout(self) -> bool:
@@ -645,11 +958,16 @@ class TexasHoldemGame:
         if self.is_action_timeout() and self.current_player_position:
             current_player = self.player_manager.get_player_by_position(self.current_player_position)
             if current_player:
+                # 更新最后操作时间，避免重复处理
+                self.last_action_time = time.time()
+                
                 if self.current_bet == 0:
                     current_player.check()
                 else:
                     current_player.fold()
                     timed_out_players.append(current_player)
+                
+                # 移动到下一个玩家（会自动跳过离线玩家）
                 self._move_to_next_player()
         
         return timed_out_players
