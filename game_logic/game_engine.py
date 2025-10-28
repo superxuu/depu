@@ -46,10 +46,11 @@ class TexasHoldemGame:
         # 玩家连接状态追踪
         self.connected_players: Set[str] = set()  # 在线玩家user_id集合
         self.disconnected_players: Set[str] = set()  # 已断开连接的玩家user_id集合
+        self.disconnected_times: Dict[str, float] = {}  # 玩家掉线时间记录
         self.spectating_players: Set[str] = set()  # 旁观玩家user_id集合（本轮不参与结算）
         # 仅剩一名在线活跃玩家时的等待提示状态
         self.single_player_waiting: Optional[Dict[str, Any]] = None
-        self.single_player_grace_period: int = 15  # 秒
+        self.single_player_grace_period: int = 20  # 秒
     
     def add_player(self, user_id: str, nickname: str, chips: int, position: int) -> bool:
         """添加玩家"""
@@ -71,11 +72,38 @@ class TexasHoldemGame:
         """设置玩家为在线状态"""
         self.connected_players.add(user_id)
         self.disconnected_players.discard(user_id)
+        # 清除掉线时间记录
+        if user_id in self.disconnected_times:
+            del self.disconnected_times[user_id]
     
     def set_player_disconnected(self, user_id: str) -> None:
         """设置玩家为离线状态"""
         self.connected_players.discard(user_id)
         self.disconnected_players.add(user_id)
+        
+        # 只有在轮到他行动时才记录掉线时间
+        player = self.player_manager.get_player(user_id)
+        if player and self.current_player_position == player.position:
+            # 记录掉线时间（只在轮到他行动时）
+            self.disconnected_times[user_id] = time.time()
+            print(f"玩家 {player.nickname} 掉线，当前轮到他行动，开始5秒计时")
+        else:
+            # 如果没轮到他行动，清除掉线时间记录
+            if user_id in self.disconnected_times:
+                del self.disconnected_times[user_id]
+            print(f"玩家 {player.nickname if player else user_id} 掉线，但没轮到他行动，不开始计时")
+        
+        # 如果游戏进行中，将掉线玩家设为旁观状态（但两人游戏有特殊处理）
+        if self.stage != GameStage.ENDED:
+            player = self.player_manager.get_player(user_id)
+            if player and not player.is_folded:
+                # 在两人游戏中，当一名玩家离线时，不立即设为旁观，等待单玩家超时检查
+                active_players = self.player_manager.get_active_players()
+                if len(active_players) == 2:
+                    print(f"玩家 {player.nickname} 掉线，两人游戏，暂不设为旁观，等待单玩家检查")
+                else:
+                    self.spectating_players.add(user_id)
+                    print(f"玩家 {player.nickname} 掉线，设为旁观状态")
         
         # 如果游戏进行中，检查是否为单玩家场景
         if self.stage != GameStage.ENDED and user_id not in self.spectating_players:
@@ -123,11 +151,24 @@ class TexasHoldemGame:
         # 设置玩家为在线状态
         self.set_player_connected(user_id)
         
-        # 如果当前处于单玩家等待状态，且重连的玩家是等待中的玩家，清除等待状态
-        if (self.single_player_waiting and 
-            self.single_player_waiting["user_id"] == user_id):
-            print(f"玩家 {user_id} 重连，清除单玩家等待状态")
-            self.single_player_waiting = None
+        # 如果玩家在旁观列表中，移除旁观状态
+        if user_id in self.spectating_players:
+            self.spectating_players.remove(user_id)
+            print(f"玩家 {user_id} 重连，移除旁观状态")
+        
+        # 如果当前处于单玩家等待状态，检查重连的玩家是否是最后离线的玩家
+        if self.single_player_waiting:
+            # 获取当前在线且未弃牌的活跃玩家（包括刚移除旁观状态的玩家）
+            online_active_players = self.get_online_active_players()
+            
+            print(f"DEBUG: 重连检查 - 在线活跃玩家数: {len(online_active_players)}, 旁观玩家: {self.spectating_players}")
+            
+            # 只有当重连的玩家是最后离线的玩家，并且当前在线玩家数达到2人时，才清除等待状态
+            if len(online_active_players) >= 2:
+                print(f"玩家 {user_id} 重连，在线玩家达到2人，清除单玩家等待状态，游戏继续")
+                self.single_player_waiting = None
+            else:
+                print(f"玩家 {user_id} 重连，但当前在线玩家仍不足2人，保持单玩家等待状态")
     
     def remove_player(self, user_id: str) -> bool:
         """移除玩家"""
@@ -550,9 +591,16 @@ class TexasHoldemGame:
         """判断是否应结束当前下注回合并进入下一阶段"""
         # 检查是否只剩1人在线，如果是则进入单玩家等待状态
         online_active_players = self.get_online_active_players()
+        
+        # 如果当前处于单玩家等待状态，但在线玩家数已恢复，清除等待状态
+        if self.single_player_waiting and len(online_active_players) >= 2:
+            print(f"DEBUG: 在线玩家恢复至{len(online_active_players)}人，清除单玩家等待状态")
+            self.single_player_waiting = None
+        
+        # 检查是否需要进入单玩家等待状态
         if len(online_active_players) <= 1 and self.stage != GameStage.ENDED and not self.single_player_waiting:
-            self._check_single_player_and_wait()
-            return False  # 等待用户决定，不立即推进
+            if self._check_single_player_and_wait():
+                return False  # 等待用户决定，不立即推进
         
         active_players = self.player_manager.get_active_players()
         if not active_players:
@@ -620,9 +668,16 @@ class TexasHoldemGame:
         
         # 检查是否只剩1人在线，如果是则进入单玩家等待状态
         online_active_players = self.get_online_active_players()
+        
+        # 如果当前处于单玩家等待状态，但在线玩家数已恢复，清除等待状态
+        if self.single_player_waiting and len(online_active_players) >= 2:
+            print(f"DEBUG: 在线玩家恢复至{len(online_active_players)}人，清除单玩家等待状态")
+            self.single_player_waiting = None
+        
+        # 检查是否需要进入单玩家等待状态
         if len(online_active_players) <= 1 and self.stage != GameStage.ENDED and not self.single_player_waiting:
-            self._check_single_player_and_wait()
-            return
+            if self._check_single_player_and_wait():
+                return  # 如果进入单玩家等待状态，停止移动玩家
         
         # 若当前玩家位置未知，无法推进到下一位（避免向 get_next_player 传入 None）
         if self.current_player_position is None:
@@ -661,13 +716,25 @@ class TexasHoldemGame:
     
     def _terminate_game_insufficient_players(self) -> None:
         """因玩家不足终止游戏"""
-        # 游戏终止，不进行结算
+        # 获取仍在游戏中的在线玩家
+        online_active_players = self.get_online_active_players()
+        
+        if len(online_active_players) == 1:
+            # 只剩一名玩家，将所有筹码归该玩家所有
+            remaining_player = online_active_players[0]
+            remaining_player.chips += self.pot
+            self.winner = remaining_player
+            print(f"游戏因玩家不足结束，筹码归 {remaining_player.nickname} 所有")
+        else:
+            # 没有玩家或多名玩家，不进行结算
+            self.winner = None
+            
+        # 游戏终止
         self.stage = GameStage.ENDED
-        self.winner = None
         self.current_player_position = None
         self.first_to_act_position = None
         
-        # 清空底池（本轮不结算）
+        # 清空底池（已分配给获胜者）
         self.pot = 0
         self.side_pots = []
         
@@ -689,12 +756,21 @@ class TexasHoldemGame:
             self.single_player_waiting = {
                 "user_id": remaining_player.user_id,
                 "start_time": time.time(),
-                "confirmed": False
+                "confirmed": False,
+                "remaining_time": self.single_player_grace_period  # 剩余时间
             }
+            
+            # 立即广播游戏状态更新，确保所有在线玩家都能看到弹框
+            return True
+        return False
     
     def handle_single_player_decision(self, user_id: str, decision: str) -> bool:
         """处理单玩家的决定（继续/结束游戏）"""
-        if not self.single_player_waiting or self.single_player_waiting["user_id"] != user_id:
+        if not self.single_player_waiting:
+            return False
+        
+        # 任何在线玩家都可以处理单玩家决定
+        if user_id not in self.connected_players:
             return False
         
         if decision == "continue":
@@ -958,17 +1034,61 @@ class TexasHoldemGame:
         if self.is_action_timeout() and self.current_player_position:
             current_player = self.player_manager.get_player_by_position(self.current_player_position)
             if current_player:
-                # 更新最后操作时间，避免重复处理
-                self.last_action_time = time.time()
-                
-                if self.current_bet == 0:
-                    current_player.check()
+                # 检查玩家是否掉线
+                if current_player.user_id in self.disconnected_players:
+                    if current_player.user_id in self.disconnected_times:
+                        disconnected_time = self.disconnected_times[current_player.user_id]
+                        current_time = time.time()
+                        # 如果掉线超过5秒，自动弃牌
+                        if current_time - disconnected_time > 5:
+                            current_player.fold()
+                            timed_out_players.append(current_player)
+                            # 移动到下一个玩家
+                            self._move_to_next_player()
+                        else:
+                            # 掉线但未超过5秒，等待重连
+                            print(f"玩家 {current_player.nickname} 掉线但未超过5秒，等待重连")
+                            # 更新最后操作时间，避免重复处理
+                            self.last_action_time = time.time()
+                    else:
+                        # 没有记录掉线时间，说明掉线时没轮到他行动，按普通超时处理
+                        self.last_action_time = time.time()
+                        if self.current_bet == 0:
+                            current_player.check()
+                        else:
+                            current_player.fold()
+                            timed_out_players.append(current_player)
+                        self._move_to_next_player()
                 else:
-                    current_player.fold()
-                    timed_out_players.append(current_player)
-                
-                # 移动到下一个玩家（会自动跳过离线玩家）
-                self._move_to_next_player()
+                    # 在线玩家突然掉线的情况：立即记录掉线时间并开始5秒计时
+                    if current_player.user_id not in self.disconnected_players:
+                        # 玩家在线时突然掉线，立即记录掉线时间
+                        self.set_player_disconnected(current_player.user_id)
+                    
+                    # 检查是否掉线超过5秒
+                    if current_player.user_id in self.disconnected_times:
+                        disconnected_time = self.disconnected_times[current_player.user_id]
+                        current_time = time.time()
+                        if current_time - disconnected_time > 5:
+                            # 掉线超过5秒，自动弃牌
+                            current_player.fold()
+                            timed_out_players.append(current_player)
+                            # 移动到下一个玩家
+                            self._move_to_next_player()
+                        else:
+                            # 掉线但未超过5秒，等待重连
+                            print(f"玩家 {current_player.nickname} 掉线但未超过5秒，等待重连")
+                            # 更新最后操作时间，避免重复处理
+                            self.last_action_time = time.time()
+                    else:
+                        # 没有掉线时间记录，说明掉线时没轮到他行动，按普通超时处理
+                        self.last_action_time = time.time()
+                        if self.current_bet == 0:
+                            current_player.check()
+                        else:
+                            current_player.fold()
+                            timed_out_players.append(current_player)
+                        self._move_to_next_player()
         
         return timed_out_players
     

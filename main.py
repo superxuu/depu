@@ -101,6 +101,14 @@ async def check_timeout_loop():
                     waiting_info = game.single_player_waiting
                     user_id = waiting_info["user_id"]
                     
+                    # 先检查在线玩家数是否已经恢复（玩家可能已经重新上线）
+                    if hasattr(game, 'get_online_active_players'):
+                        online_active_players = game.get_online_active_players()
+                        if len(online_active_players) >= 2:
+                            print(f"单玩家等待状态检测到在线玩家已恢复至{len(online_active_players)}人，清除等待状态")
+                            game.single_player_waiting = None
+                            continue  # 跳过超时检查
+                    
                     # 检查是否超时（默认等待时间15秒）
                     elapsed = time.time() - waiting_info["start_time"]
                     if elapsed > game.single_player_grace_period:
@@ -662,6 +670,13 @@ async def websocket_game_endpoint(websocket: WebSocket):
                 "user_id": user["user_id"],
                 "nickname": user["nickname"]
             }, user["user_id"])
+            
+            # 重要：立即广播游戏状态更新，确保前端状态同步
+            game_state = active_games[room_id].get_game_state()
+            await manager.broadcast({
+                "type": "game_state_update",
+                "data": game_state
+            })
         
         # 添加玩家到房间（使用数据库存储）
         db.execute_update(
@@ -853,40 +868,28 @@ async def websocket_game_endpoint(websocket: WebSocket):
                     # 当前离线玩家需要行动，自动跳过
                     game._move_to_next_player()
                 
-                # 延迟检查单玩家场景（等待5秒，确认玩家是否重连）
-                async def check_single_player_after_delay():
-                    await asyncio.sleep(5)  # 等待5秒
+                # 立即检查单玩家场景
+                def check_single_player_immediately():
+                    # 检查是否只剩1人
+                    online_count = len([p for p in game.player_manager.get_active_players() 
+                                      if p.user_id in game.connected_players and 
+                                      p.user_id not in game.spectating_players])
                     
-                    # 再次检查是否有游戏
-                    if FIXED_ROOM_ID not in active_games:
-                        return
-                    
-                    game_check = active_games.get(FIXED_ROOM_ID)
-                    if not game_check:
-                        return
-                    
-                    # 检查该玩家是否已重连
-                    if user_id in manager.active_connections:
-                        print(f"玩家 {user_id} 已重连，不触发单玩家场景")
-                        return
-                    
-                    # 玩家确实离线，检查是否只剩1人
-                    online_count = len([p for p in game_check.player_manager.get_active_players() 
-                                      if p.user_id in game_check.connected_players and 
-                                      p.user_id not in game_check.spectating_players])
-                    
-                    print(f"延迟检查: 玩家 {user_id} 确实离线，剩余在线玩家: {online_count}")
+                    print(f"立即检查: 玩家 {user_id} 离线，剩余在线玩家: {online_count}")
                     
                     if online_count == 1:
-                        print("触发单玩家等待场景")
-                        game_check._check_single_player_and_wait()
-                        await manager.broadcast({
-                            "type": "game_state_update",
-                            "data": game_check.get_game_state()
-                        })
+                        print("立即触发单玩家等待场景")
+                        if game._check_single_player_and_wait():
+                            # 如果进入单玩家等待状态，立即广播游戏状态更新
+                            return True
+                    return False
                 
-                # 启动延迟检查任务
-                asyncio.create_task(check_single_player_after_delay())
+                # 立即检查单玩家场景
+                if check_single_player_immediately():
+                    await manager.broadcast({
+                        "type": "game_state_update",
+                        "data": game.get_game_state()
+                    })
                 
                 # 立即广播当前状态（移除该玩家的显示）
                 await manager.broadcast({

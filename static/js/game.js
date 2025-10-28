@@ -232,8 +232,24 @@ class PokerGame {
         const stage = this.normalizeStage(gameState.stage);
         
         // 检查单玩家等待状态（只在有游戏进行中时检查）
-        if (stage && stage !== 'ended' && stage !== 'waiting' && gameState.single_player_waiting && gameState.single_player_waiting.user_id === this.user?.user_id) {
-            this.showSinglePlayerDialog();
+        // 只有当single_player_waiting存在且当前用户是等待用户时才显示弹框
+        // 同时检查在线玩家数量，避免在多人游戏时错误显示弹框
+        if (stage && stage !== 'ended' && stage !== 'waiting' && 
+            gameState.single_player_waiting && 
+            gameState.single_player_waiting.user_id === this.user?.user_id) {
+            
+            // 额外检查：确保当前确实只有一名在线活跃玩家
+            const onlinePlayers = gameState.players?.filter(p => 
+                p.connection_status === 'online' && !p.is_folded
+            ) || [];
+            
+            if (onlinePlayers.length <= 1) {
+                // 只有游戏中的最后一个玩家才能看到单玩家弹框
+                this.showSinglePlayerDialog();
+            } else {
+                // 如果在线玩家超过1人，说明已经恢复为多人游戏，隐藏弹框
+                this.hideSinglePlayerDialog();
+            }
         } else {
             this.hideSinglePlayerDialog();
         }
@@ -362,6 +378,12 @@ class PokerGame {
         
         // 强制从API获取最新玩家数据，确保实时性
         await this.updateRoomPlayersForce();
+        
+        // 玩家重连时，自动隐藏单玩家弹框（恢复为多人游戏）
+        this.hideSinglePlayerDialog();
+        
+        // 重要：请求最新的游戏状态，确保游戏可以继续
+        // 后端已经广播了game_state_update消息，前端会自动处理
     }
     
     async handleGameStarted(payload) {
@@ -609,6 +631,50 @@ class PokerGame {
         const overlay = document.getElementById('single-player-overlay');
         if (overlay) {
             overlay.classList.add('active');
+            
+            // 启动倒计时
+            this.startSinglePlayerCountdown();
+        }
+    }
+    
+    startSinglePlayerCountdown() {
+        // 清除之前的倒计时
+        if (this.singlePlayerCountdownInterval) {
+            clearInterval(this.singlePlayerCountdownInterval);
+        }
+        
+        let countdown = 20; // 20秒倒计时
+        const countdownEl = document.getElementById('single-player-countdown');
+        
+        if (countdownEl) {
+            countdownEl.textContent = countdown;
+        }
+        
+        this.singlePlayerCountdownInterval = setInterval(() => {
+            countdown--;
+            if (countdownEl) {
+                countdownEl.textContent = countdown;
+            }
+            
+            if (countdown <= 0) {
+                // 倒计时结束，自动结束游戏
+                clearInterval(this.singlePlayerCountdownInterval);
+                this.sendSinglePlayerDecision('end');
+                this.hideSinglePlayerDialog();
+            }
+        }, 1000);
+    }
+    
+    hideSinglePlayerDialog() {
+        const overlay = document.getElementById('single-player-overlay');
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
+        
+        // 清除倒计时
+        if (this.singlePlayerCountdownInterval) {
+            clearInterval(this.singlePlayerCountdownInterval);
+            this.singlePlayerCountdownInterval = null;
         }
     }
     
@@ -1473,12 +1539,8 @@ class PokerGame {
         });
         
         // 单玩家弹窗按钮
-        document.getElementById('single-player-continue')?.addEventListener('click', () => {
-            this.sendSinglePlayerDecision('continue');
-            this.hideSinglePlayerDialog();
-        });
-        
-        document.getElementById('single-player-end')?.addEventListener('click', () => {
+        document.getElementById('single-player-immediate-end')?.addEventListener('click', () => {
+            // 立即结束游戏
             this.sendSinglePlayerDecision('end');
             this.hideSinglePlayerDialog();
         });

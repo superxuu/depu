@@ -98,11 +98,12 @@
     <div class="single-player-title">仅剩您一名玩家</div>
     <div class="single-player-content">
       <p>其他玩家已离开游戏，您想如何处理？</p>
-      <p class="single-player-hint">15秒后自动结束游戏</p>
+      <p class="single-player-hint">
+        <span id="single-player-countdown">20</span>秒后自动结束游戏
+      </p>
     </div>
     <div class="single-player-actions">
-      <button class="single-player-btn single-player-btn-primary" id="single-player-continue">继续等待</button>
-      <button class="single-player-btn single-player-btn-danger" id="single-player-end">结束游戏</button>
+      <button class="single-player-btn single-player-btn-warning" id="single-player-immediate-end">立即结束</button>
     </div>
   </div>
 </div>
