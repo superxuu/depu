@@ -982,8 +982,12 @@ class TexasHoldemGame:
         self.stage = GameStage.ENDED
         return True
     
-    def get_game_state(self) -> Dict[str, Any]:
-        """获取游戏状态"""
+    def get_game_state(self, requesting_user_id: Optional[str] = None) -> Dict[str, Any]:
+        """获取游戏状态
+        
+        Args:
+            requesting_user_id: 请求游戏状态的用户ID，如果提供，则只显示该用户的手牌
+        """
         current_player_id: Optional[str] = None
         if self.current_player_position is not None:
             cp = self.player_manager.get_player_by_position(self.current_player_position)
@@ -993,11 +997,30 @@ class TexasHoldemGame:
         # 计算剩余超时时间
         time_remaining = max(0, self.action_timeout - (time.time() - self.last_action_time))
 
-        # 为每个玩家添加连接状态
+        # 为每个玩家添加连接状态，并根据请求用户ID过滤手牌显示
         players_with_status = []
         for player_dict in self.player_manager.to_dict_list():
             player_dict_copy = player_dict.copy()
             player_dict_copy["connection_status"] = self.get_player_connection_status(player_dict["user_id"])
+            
+            # 手牌显示规则：
+            # 1. 如果请求用户ID为None，显示所有手牌（用于调试）
+            # 2. 如果请求用户ID与玩家ID相同，显示该玩家的手牌
+            # 3. 如果游戏进入摊牌阶段，显示所有手牌
+            # 4. 否则，隐藏其他玩家的手牌
+            if requesting_user_id is None:
+                # 调试模式：显示所有手牌
+                pass
+            elif player_dict["user_id"] == requesting_user_id:
+                # 显示当前用户自己的手牌
+                pass
+            elif self.stage == GameStage.SHOWDOWN or self.stage == GameStage.ENDED:
+                # 摊牌或结束阶段：显示所有手牌
+                pass
+            else:
+                # 其他情况：隐藏手牌
+                player_dict_copy["hole_cards"] = []
+            
             players_with_status.append(player_dict_copy)
 
         return {

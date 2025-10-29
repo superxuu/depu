@@ -1141,10 +1141,13 @@ async def handle_game_end(room_id: str, game: TexasHoldemGame):
         "pot": game_state["pot"]
     })
     # 同步一次权威的游戏状态（stage 应为 ended），确保前端进入准备区
-    await manager.broadcast({
-        "type": "game_state_update",
-        "data": game_state
-    })
+    # 注意：这里需要为每个玩家单独发送游戏状态，确保赢家标志正确显示
+    for user_id in manager.active_connections.keys():
+        user_game_state = game.get_game_state(user_id)
+        await manager.send_personal_message({
+            "type": "game_state_update",
+            "data": user_game_state
+        }, user_id)
     
     # 保留已结束的游戏实例，以便结束后仍可自愿摊牌；新一局开始时再清理
     # （不在此处删除 active_games[room_id]）
@@ -1309,17 +1312,15 @@ async def start_game_in_room(room_id: str):
             print(f"游戏成功开始！")
             update_room_status(room_id, "playing")
             
-            # 广播游戏开始（提示用）
-            game_state = game.get_game_state()
-            await manager.broadcast({
-                "type": "game_started",
-                "data": game_state
-            })
-            # 立刻广播一次权威游戏状态，确保前端渲染完整状态（盲注、底牌、当前行动位等）
-            await manager.broadcast({
-                "type": "game_state_update",
-                "data": game_state
-            })
+            # 游戏开始后，为每个玩家单独发送包含手牌信息的游戏状态
+            # 确保每个玩家只能看到自己的手牌
+            for player in eligible_players:
+                game_state = game.get_game_state(player["user_id"])
+                # 发送包含手牌信息的游戏状态更新
+                await manager.send_personal_message({
+                    "type": "game_state_update",
+                    "data": game_state
+                }, player["user_id"])
             
             return True
         else:

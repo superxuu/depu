@@ -10,6 +10,8 @@ class PokerGame {
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 3000; // 初始重连延迟3秒
+        this.lastGameWinners = []; // 保存上一局的赢家信息
+        this.lastGameWinnerDeltas = {}; // 保存赢家的筹码变化信息
         
         console.log('开始初始化WebSocket...');
         this.initializeSocket();
@@ -228,6 +230,9 @@ class PokerGame {
     handleGameStateUpdate(gameState) {
         this.gameState = gameState;
         
+        // 重要：同步更新玩家数据，确保赢家标志正确显示
+        this.latestPlayersData = { players: gameState.players };
+        
         // 检查游戏阶段，如果是结束阶段，不调用renderGameState以避免覆盖准备按钮
         const stage = this.normalizeStage(gameState.stage);
         
@@ -253,6 +258,9 @@ class PokerGame {
         } else {
             this.hideSinglePlayerDialog();
         }
+        
+        // 重要：在游戏状态更新时，立即渲染玩家个人手牌
+        this.renderPlayerHoleCardsFromGameState();
         
         if (stage !== 'ended') {
             this.renderGameState();
@@ -405,6 +413,10 @@ class PokerGame {
             }
         }
         this.showToast('游戏开始！', 'success');
+        
+        // 清除上一局的赢家信息，因为新游戏开始了
+        this.lastGameWinners = [];
+        
         // 依据当前状态更新阶段显示并立刻渲染玩家（以显示庄家 D）
         const stage = this.normalizeStage(this.gameState?.stage || 'preflop');
         this.updateGameStage(stage);
@@ -421,7 +433,22 @@ class PokerGame {
         } else if (data.winner) {
             this.showToast(`${data.winner.nickname} 获胜！`, 'info');
         }
+        
+        // 保存赢家信息和筹码变化，用于在玩家点击准备按钮前继续显示
+        if (data.winner) {
+            this.lastGameWinners = [data.winner.user_id];
+            // 保存赢家的筹码变化信息
+            this.lastGameWinnerDeltas = {};
+            this.lastGameWinnerDeltas[data.winner.user_id] = data.winner.hand_delta || 0;
+        } else {
+            this.lastGameWinners = [];
+            this.lastGameWinnerDeltas = {};
+        }
+        
         this.updateGameStage('ended');
+        
+        // 重要：在游戏结束后立即渲染玩家，显示赢家标志和筹码变化
+        this.renderPlayers();
         
         // 强制显示准备按钮区域，隐藏游戏操作区域
         const readySection = document.getElementById('ready-section');
@@ -497,6 +524,13 @@ class PokerGame {
             console.error('WebSocket 未连接，无法准备');
             this.showToast('连接已断开，请刷新页面', 'error');
             return;
+        }
+        
+        // 如果当前玩家是上一局的赢家，点击准备后清除赢家标志和筹码变化信息
+        if (this.lastGameWinners.includes(this.user.user_id)) {
+            this.lastGameWinners = this.lastGameWinners.filter(id => id !== this.user.user_id);
+            delete this.lastGameWinnerDeltas[this.user.user_id];
+            console.log('赢家点击准备，清除赢家标志和筹码变化信息');
         }
         
         console.log('发送准备消息');
@@ -1048,8 +1082,21 @@ class PokerGame {
         // 准备状态指示器
         const readyIndicator = player.is_ready ? 
             `<div class="ready-indicator" title="已准备">✓</div>` : '';
-        // 胜利徽标（摊牌后）
-        const winBadge = player.win ? `<div class="win-badge" title="本手牌获胜">WIN</div>` : '';
+        
+        // 胜利状态 - 在游戏结束后阶段持续显示赢家圆圈效果，直到玩家点击准备按钮
+        let isWinner = player.win;
+        // 如果游戏已经结束，检查保存的赢家信息（赢家圆圈效果持续显示直到玩家点击准备）
+        const stage = this.normalizeStage(this.gameState?.stage || 'waiting');
+        if (stage === 'ended' && this.lastGameWinners.includes(player.user_id)) {
+            isWinner = true;
+        }
+        
+        // 添加winner类到玩家圆圈，显示金色边框效果
+        if (isWinner) {
+            playerEl.classList.add('winner');
+        } else {
+            playerEl.classList.remove('winner');
+        }
         // 操作徽标（最近一次操作）
         const actionMap = { 'check': '过牌', 'call': '跟注', 'raise': '加注', 'fold': '弃牌', 'sb': '小盲', 'bb': '大盲' };
         let actionText = '';
@@ -1059,10 +1106,22 @@ class PokerGame {
             actionText = actionMap[player.last_action];
         }
         const actionBadge = actionText ? `<div class="action-badge" style="display:inline-block;padding:2px 6px;border-radius:10px;background:rgba(255,255,255,0.85);color:#000;font-size:12px;margin-top:4px;">${actionText}</div>` : '';
-        // 手牌净变化（仅在非0时展示）
-        const deltaHtml = (typeof player.hand_delta === 'number' && player.hand_delta !== 0)
-            ? `<div class="player-delta ${player.hand_delta > 0 ? 'pos' : 'neg'}">
-                   ${player.hand_delta > 0 ? '+' : ''}${player.hand_delta}
+        // 手牌净变化（仅在非0时展示）- 在游戏结束后阶段持续显示赢家的筹码变化
+        let showDelta = (typeof player.hand_delta === 'number' && player.hand_delta !== 0);
+        let deltaValue = player.hand_delta;
+        
+        // 如果游戏已经结束，检查保存的赢家筹码变化信息
+        if (stage === 'ended' && this.lastGameWinners.includes(player.user_id)) {
+            const savedDelta = this.lastGameWinnerDeltas[player.user_id];
+            if (savedDelta !== undefined && savedDelta !== 0) {
+                showDelta = true;
+                deltaValue = savedDelta;
+            }
+        }
+        
+        const deltaHtml = showDelta
+            ? `<div class="player-delta ${deltaValue > 0 ? 'pos' : 'neg'}">
+                   ${deltaValue > 0 ? '+' : ''}${deltaValue}
                </div>`
             : '';
         
@@ -1074,7 +1133,6 @@ class PokerGame {
             <div class="player-status-circle">${this.getPlayerStatusText(player)}</div>
             ${actionBadge}
             ${readyIndicator}
-            ${winBadge}
         `;
         
         // 设置data-user-id属性用于后续更新
@@ -1092,6 +1150,26 @@ class PokerGame {
                 const cardEl = this.createCardElement(card);
                 playerHoleCardsEl.appendChild(cardEl);
             });
+        }
+    }
+    
+    // 从游戏状态中提取当前用户的手牌并渲染
+    renderPlayerHoleCardsFromGameState() {
+        if (!this.gameState || !this.gameState.players || !this.user) {
+            return;
+        }
+        
+        // 查找当前用户在游戏状态中的信息
+        const currentPlayer = this.gameState.players.find(p => p.user_id === this.user.user_id);
+        if (currentPlayer && currentPlayer.hole_cards && currentPlayer.hole_cards.length > 0) {
+            console.log('渲染玩家个人手牌:', currentPlayer.hole_cards);
+            this.renderPlayerHoleCards(currentPlayer.hole_cards);
+        } else {
+            // 如果没有手牌数据，清空手牌显示区域
+            const playerHoleCardsEl = document.getElementById('player-hole-cards');
+            if (playerHoleCardsEl) {
+                playerHoleCardsEl.innerHTML = '';
+            }
         }
     }
     
