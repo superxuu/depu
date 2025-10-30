@@ -116,7 +116,6 @@ class Database:
             results = [dict(row) for row in cursor.fetchall()]
             return results
         except sqlite3.Error as e:
-            print(f"数据库查询错误: {e}")
             return []
         finally:
             if conn:
@@ -138,7 +137,6 @@ class Database:
             affected = cursor.rowcount
             return affected
         except sqlite3.Error as e:
-            print(f"数据库更新错误: {e}")
             if conn:
                 conn.rollback()
             return 0

@@ -12,22 +12,15 @@ class PokerApp {
     }
 
     async checkAuth() {
-        console.group('认证检查');
         
         try {
-            // 1. 调试：检查所有cookie
-            console.log('所有cookie:', document.cookie);
-            
             // 2. 直接从cookie获取session_token（符合技术方案）
             let sessionToken = this.getCookie('session_token');
-            console.log('首次从cookie获取sessionToken:', sessionToken);
             
             // 3. 如果cookie为空，等待一段时间后重试（给cookie设置时间）
             if (!sessionToken) {
-                console.log('cookie为空，等待100ms后重试...');
                 await new Promise(resolve => setTimeout(resolve, 100));
                 sessionToken = this.getCookie('session_token');
-                console.log('重试后从cookie获取sessionToken:', sessionToken);
             }
             
             // 4. 如果仍然为空，检查是否是重定向后的页面
@@ -35,20 +28,19 @@ class PokerApp {
                 // 检查URL参数，看是否有认证错误
                 const urlParams = new URLSearchParams(window.location.search);
                 if (urlParams.has('auth_error')) {
-                    console.warn('认证错误：cookie在重定向过程中丢失');
+    
                     this.showToast('认证失败：请重新登录', 'error');
                     return false;
                 }
                 
                 // 如果是房间页面但没有cookie，重定向到首页
                 if (window.location.pathname === '/room') {
-                    console.warn('房间页面缺少cookie，重定向到首页');
+    
                     window.location.href = '/';
                     return false;
                 }
                 
                 // 其他页面允许继续
-                console.log('页面不需要认证');
                 return true;
             }
             
@@ -58,30 +50,23 @@ class PokerApp {
                                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(sessionToken);
             
             if (!isValidToken) {
-                console.error('无效的会话令牌格式:', sessionToken);
+    
                 const error = new Error('无效的会话令牌格式');
                 error.token = sessionToken;
                 throw error;
             }
 
             // 3. 调用API验证用户
-            console.log('调用/api/user-info验证用户...');
-            const startTime = performance.now();
-            
             const response = await fetch('/api/user-info', {
                 credentials: 'include'  // 自动包含cookie
             });
-            
-            const duration = (performance.now() - startTime).toFixed(2);
-            console.log(`API调用完成，耗时${duration}ms`, response);
 
             if (response.ok) {
                 this.currentUser = await response.json();
-                console.log('认证成功，用户信息:', this.currentUser);
                 this.updateUserInfo();
                 return true;
             } else if (response.status === 401) {
-                console.warn('认证失败，状态码401');
+
                 
                 // 清理无效的认证数据
                 localStorage.removeItem('session_token');
@@ -102,8 +87,6 @@ class PokerApp {
                 throw error;
             }
         } catch (error) {
-            console.error('认证检查失败:', error);
-            
             let errorMessage = '认证检查失败';
             if (error.message.includes('Failed to fetch')) {
                 errorMessage = '无法连接服务器';
@@ -121,8 +104,6 @@ class PokerApp {
             }
             
             return false;
-        } finally {
-            console.groupEnd();
         }
     }
 
@@ -247,7 +228,6 @@ class PokerApp {
 
             return await response.json();
         } catch (error) {
-            console.error('API调用失败:', error);
             this.showToast(error.message, 'error');
             throw error;
         }
@@ -310,7 +290,6 @@ const storage = {
         try {
             localStorage.setItem(key, JSON.stringify(value));
         } catch (error) {
-            console.warn('本地存储失败:', error);
         }
     },
 
@@ -319,7 +298,6 @@ const storage = {
             const item = localStorage.getItem(key);
             return item ? JSON.parse(item) : defaultValue;
         } catch (error) {
-            console.warn('本地读取失败:', error);
             return defaultValue;
         }
     },
@@ -328,7 +306,6 @@ const storage = {
         try {
             localStorage.removeItem(key);
         } catch (error) {
-            console.warn('本地删除失败:', error);
         }
     }
 };

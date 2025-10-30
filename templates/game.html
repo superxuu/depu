@@ -112,15 +112,9 @@
 <script src="{{ url_for('static', path='js/game.js') }}?v=1.5"></script>
 <script>
     // 极简认证 - 只使用cookie（符合技术方案）
-    console.log('页面加载，检查cookie认证状态');
-    console.log('当前cookie:', document.cookie);
-    
-    // 简单的cookie检查
     const sessionToken = document.cookie.match(/session_token=([^;]+)/)?.[1];
-    console.log('从cookie获取的sessionToken:', sessionToken);
     
     if (!sessionToken) {
-        console.warn('未找到session_token cookie，重定向到首页');
         // 添加延迟以确保cookie有足够时间设置
         setTimeout(() => {
             const retryToken = document.cookie.match(/session_token=([^;]+)/)?.[1];
@@ -129,23 +123,6 @@
             }
         }, 100);
     }
-    
-    // 添加详细的调试信息
-    console.log('游戏页面加载完成，检查DOM元素:');
-    console.log('ready-btn元素:', document.getElementById('ready-btn'));
-    console.log('unready-btn元素:', document.getElementById('unready-btn'));
-    console.log('players-container元素:', document.getElementById('players-container'));
-    console.log('user数据:', document.getElementById('user-data')?.textContent);
-    
-    // 检查WebSocket连接状态
-    setTimeout(() => {
-        if (window.game && window.game.socket) {
-            console.log('WebSocket连接状态:', window.game.socket.readyState);
-            console.log('WebSocket URL:', window.game.socket.url);
-        } else {
-            console.log('WebSocket未初始化或game对象不存在');
-        }
-    }, 2000);
 </script>
 {% endblock %}
 

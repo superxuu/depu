@@ -83,10 +83,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 const room = await response.json();
                 window.location.href = "/room";
             } else {
-                alert('创建房间失败');
+                // 创建房间失败
             }
         } catch (error) {
-            alert('网络错误');
+            // 网络错误
         }
     });
 });

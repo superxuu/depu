@@ -105,7 +105,6 @@ async def check_timeout_loop():
                     if hasattr(game, 'get_online_active_players'):
                         online_active_players = game.get_online_active_players()
                         if len(online_active_players) >= 2:
-                            print(f"单玩家等待状态检测到在线玩家已恢复至{len(online_active_players)}人，清除等待状态")
                             game.single_player_waiting = None
                             continue  # 跳过超时检查
                     
@@ -113,7 +112,6 @@ async def check_timeout_loop():
                     elapsed = time.time() - waiting_info["start_time"]
                     if elapsed > game.single_player_grace_period:
                         # 超时自动结束游戏
-                        print(f"单玩家等待超时，自动结束游戏")
                         game.handle_single_player_decision(user_id, "end")
                         await handle_game_end(room_id, game)
                 
@@ -136,7 +134,6 @@ async def check_timeout_loop():
                             }, player.user_id)
                             
         except Exception as e:
-            print(f"超时检查出错: {e}")
             await asyncio.sleep(5)  # 出错后等待5秒再继续
 
 async def periodic_cleanup_loop():
@@ -181,13 +178,11 @@ async def periodic_cleanup_loop():
                         "user_id": user_id,
                         "nickname": nickname
                     })
-                    print(f"清理离线玩家: {nickname} (ID: {user_id})")
             
             # 刷新准备计数
             await update_ready_count(FIXED_ROOM_ID)
             
         except Exception as e:
-            print(f"定期清理出错: {e}")
             await asyncio.sleep(60)  # 出错后等待1分钟再继续
 
 def start_timeout_check():
@@ -287,8 +282,6 @@ async def create_user_endpoint(request: Request):
     response = RedirectResponse("/room", status_code=303)
     
     # 调试：打印cookie信息
-    print(f"DEBUG: 设置cookie - key: session_token, value: {user['session_token']}")
-    
     response.set_cookie(
         key="session_token",
         value=user["session_token"],
@@ -298,10 +291,6 @@ async def create_user_endpoint(request: Request):
         path="/",  # 确保cookie在所有路径下可用
         domain=None  # 明确设置domain为None
     )
-    
-    # 调试：检查cookie是否设置成功
-    cookie_header = response.headers.get('set-cookie')
-    print(f"DEBUG: Set-Cookie头: {cookie_header}")
     
     return response
 
@@ -373,7 +362,6 @@ async def get_room_status():
         "SELECT user_id, nickname, chips FROM room_players WHERE room_id = ?",
         (FIXED_ROOM_ID,)
     )
-    print(f"从数据库获取的玩家: {players}")
     
     players_list = [
         {
@@ -412,7 +400,6 @@ async def get_players(request: Request):
         "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
         (FIXED_ROOM_ID,)
     )
-    print(f"DEBUG: 从数据库获取的玩家: {players}")
     
     players_list = [
         {
@@ -427,7 +414,6 @@ async def get_players(request: Request):
         for player in players
     ]
     
-    print(f"DEBUG: players_list: {players_list}")
     return {
         "players": players_list,
         "total_players": len(players_list)
@@ -629,30 +615,22 @@ async def websocket_game_endpoint(websocket: WebSocket):
     
     try:
         # 等待认证消息
-        print("等待认证消息（单一房间）")
         auth_data = await websocket.receive_json()
-        print(f"收到认证消息: {auth_data}")
         
         if auth_data.get("type") != "auth":
-            print("认证失败: 消息类型不是auth")
             await websocket.close(code=1008, reason="需要认证")
             return
         
         session_token = auth_data.get("session_token")
         if not session_token:
-            print("认证失败: 缺少session_token")
             await websocket.close(code=1008, reason="无效的会话令牌")
             return
         
         # 验证用户
-        print(f"验证session_token: {session_token}")
         user = get_user_by_session_token(session_token)
         if not user:
-            print("认证失败: 无效的session_token")
             await websocket.close(code=1008, reason="无效的会话令牌")
             return
-        
-        print(f"认证成功: 用户 {user['nickname']}")
         
         # 存储连接
         await manager.connect(user["user_id"], websocket)
@@ -683,14 +661,12 @@ async def websocket_game_endpoint(websocket: WebSocket):
             "INSERT OR REPLACE INTO room_players (room_id, user_id, nickname, chips) VALUES (?, ?, ?, ?)",
             (room_id, user["user_id"], user["nickname"], user["chips"])
         )
-        print(f"玩家 {user['nickname']} 已添加到房间 {room_id}")
         
         # 获取当前房间的所有玩家
         players = db.execute_query(
             "SELECT user_id, nickname, chips FROM room_players WHERE room_id = ?",
             (room_id,)
         )
-        print(f"当前房间玩家: {players}")
         
         # 发送认证成功消息
         await manager.send_personal_message({
@@ -748,7 +724,7 @@ async def websocket_game_endpoint(websocket: WebSocket):
                         }, user["user_id"])
             except Exception as _e:
                 # 仅记录，不影响后续流程
-                print(f"单播进行中游戏状态失败: {_e}")
+                pass
         
         # 玩家加入后，更新准备计数
         await update_ready_count(room_id)
@@ -820,7 +796,6 @@ async def websocket_game_endpoint(websocket: WebSocket):
                         }, user["user_id"])
                 
     except WebSocketDisconnect:
-        print("WebSocket连接断开")
         user_id = None
         for uid, conn in manager.active_connections.items():
             if conn == websocket:
@@ -875,10 +850,8 @@ async def websocket_game_endpoint(websocket: WebSocket):
                                       if p.user_id in game.connected_players and 
                                       p.user_id not in game.spectating_players])
                     
-                    print(f"立即检查: 玩家 {user_id} 离线，剩余在线玩家: {online_count}")
                     
                     if online_count == 1:
-                        print("立即触发单玩家等待场景")
                         if game._check_single_player_and_wait():
                             # 如果进入单玩家等待状态，立即广播游戏状态更新
                             return True
@@ -953,7 +926,6 @@ async def websocket_game_endpoint(websocket: WebSocket):
                 # 没有游戏实例，正常检查开局条件
                 await check_game_start_condition(FIXED_ROOM_ID)
     except Exception as e:
-        print(f"WebSocket错误: {e}")
         try:
             await websocket.close(code=1011, reason="内部错误")
         except:
@@ -1103,7 +1075,6 @@ async def handle_game_action(user: Dict[str, Any], data: Dict[str, Any], room_id
             }, user["user_id"])
             
     except Exception as e:
-        print(f"游戏操作错误: {e}")
         await manager.send_personal_message({
             "type": "action_error",
             "message": "操作失败，请重试"
@@ -1159,7 +1130,7 @@ async def handle_game_end(room_id: str, game: TexasHoldemGame):
     )
     await update_ready_count(room_id)
     
-    print(f"房间 {room_id} 的游戏已结束")
+
     
     # 游戏结束后检查是否可以开始新游戏（如果玩家已经准备好）
     await check_game_start_condition(room_id)
@@ -1177,8 +1148,7 @@ async def check_game_start_condition(room_id: str):
     online_total = len(online_players)
     ready_online = sum(1 for p in online_players if p["is_ready"])
     
-    # 添加调试信息
-    print(f"房间 {room_id} 准备检查: 在线{online_total}人，已准备{ready_online}人")
+
     
     # 至少2名在线玩家，且全部已准备；允许在“无实例”或“存在已结束实例”情况下开启新局
     if online_total >= 2 and ready_online == online_total:
@@ -1192,12 +1162,11 @@ async def check_game_start_condition(room_id: str):
                         await start_game_in_room(room_id)
                     # 如果游戏还未结束，不做任何操作
                     else:
-                        print(f"房间 {room_id} 游戏正在进行中，不重新开始")
+                        pass
                 else:
                     # 没有stage属性，开始新游戏
                     await start_game_in_room(room_id)
             except Exception as e:
-                print(f"检查游戏阶段时出错: {e}")
                 await start_game_in_room(room_id)
         else:
             await start_game_in_room(room_id)
@@ -1225,20 +1194,16 @@ async def update_ready_count(room_id: str):
 
 async def start_game_in_room(room_id: str):
     """在房间中开始新游戏"""
-    print(f"开始房间 {room_id} 的新游戏")
+
     
     # 若存在已结束的游戏实例，允许重启：先移除旧实例以便开始新手牌
     if room_id in active_games:
         existing = active_games[room_id]
         try:
-            if hasattr(existing, "stage") and existing.stage == GameStage.ENDED:
-                del active_games[room_id]
-                print(f"移除已结束的游戏实例")
-            else:
-                print(f"游戏实例存在且未结束，阶段: {existing.stage}")
-        except Exception as e:
-            print(f"检查游戏实例时出错: {e}")
             del active_games[room_id]
+        except:
+            pass
+    
     if room_id not in active_games:
         # 创建新游戏实例
         room = get_room_by_id(room_id)
@@ -1260,11 +1225,9 @@ async def start_game_in_room(room_id: str):
             if p["user_id"] in manager.active_connections and p.get("is_ready")
         ]
         
-        print(f"符合条件玩家数: {len(eligible_players)}, 玩家详情: {eligible_players}")
         
         # 人数不足2，不启动
         if len(eligible_players) < 2:
-            print(f"人数不足2人，无法开始游戏")
             if room_id in active_games:
                 del active_games[room_id]
             # 向所有在线玩家发送错误信息
@@ -1276,11 +1239,9 @@ async def start_game_in_room(room_id: str):
         
         # 添加玩家到游戏（顺序按当前列表顺序）
         for player in eligible_players:
-            print(f"添加玩家到游戏: {player['nickname']} (ID: {player['user_id']})")
             
             # 检查筹码，如果不足则补充到默认筹码
             if player["chips"] < game.min_bet:
-                print(f"玩家 {player['nickname']} 筹码不足 ({player['chips']} < {game.min_bet})，自动补充到默认筹码")
                 # 更新数据库中的筹码
                 db.execute_update(
                     "UPDATE users SET chips = ? WHERE user_id = ?",
@@ -1303,13 +1264,9 @@ async def start_game_in_room(room_id: str):
             # 确保玩家在线状态正确设置
             game.set_player_connected(player["user_id"])
         
-        print(f"游戏中玩家总数: {len(game.player_manager.players)}")
-        print(f"在线活跃玩家数: {len(game.get_online_active_players())}")
         
         # 开始游戏
-        print(f"尝试开始游戏...")
         if game.start_game():
-            print(f"游戏成功开始！")
             update_room_status(room_id, "playing")
             
             # 游戏开始后，为每个玩家单独发送包含手牌信息的游戏状态
@@ -1324,7 +1281,6 @@ async def start_game_in_room(room_id: str):
             
             return True
         else:
-            print(f"游戏开始失败")
             # 向所有在线玩家发送错误信息
             await manager.broadcast({
                 "type": "game_start_error",
@@ -1336,17 +1292,12 @@ async def start_game_in_room(room_id: str):
 @app.on_event("startup")
 async def startup_event():
     """应用启动时初始化"""
-    print("AI扑克训练启动中...")
-    print(f"访问地址: http://{settings.HOST}:{settings.PORT}")
-    print(f"API文档: http://{settings.HOST}:{settings.PORT}/docs")
     
     # 启动超时检查任务
     start_timeout_check()
-    print("游戏超时检查任务已启动")
     
     # 启动定期清理任务
     start_periodic_cleanup()
-    print("定期清理任务已启动")
 
 if __name__ == "__main__":
     import uvicorn
