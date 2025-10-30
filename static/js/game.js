@@ -742,10 +742,20 @@ class PokerGame {
         return isNaN(inc) ? 0 : inc;
     }
     // 统一：本回合“最小加到”目标总注 = 台面当前总注 + 最小增量
-    getMinRaiseTarget() {
-        const tableBet = Number(this.gameState?.current_bet || 0);
+    // 计算最小加注额（跟注所需金额 + 上一次加注金额）
+    getMinRaiseAmount() {
+        const callAmount = this.calculateCallAmount();
         const lastInc = this.getLastIncrement();
-        return tableBet + lastInc;
+        return callAmount + lastInc;
+    }
+    
+    // 计算加注到的总金额（玩家当前下注额 + 最小加注额）
+    getMinRaiseTarget() {
+        const currentPlayer = this.gameState.players.find(p => p.user_id === this.user.user_id);
+        if (!currentPlayer) return 0;
+        
+        const minRaiseAmount = this.getMinRaiseAmount();
+        return Number(currentPlayer.current_bet || 0) + minRaiseAmount;
     }
 
     renderGameState() {
@@ -966,10 +976,9 @@ class PokerGame {
             const callNeed = Math.max(0, callAmount); // 需先补足的跟注额
 
             // 输入框表示“加到的总注（raise-to）”，范围：下限=至少加到，上限=我的当前总注+剩余筹码
-            const minTarget = this.getMinRaiseTarget();
-            const myBet = Number(currentPlayer.current_bet || 0);
-            raiseInput.min = String(minTarget);
-            raiseInput.max = String(myBet + chips);
+            const minRaiseIncrement = this.getMinRaiseAmount(); // 最小加注增量 = 跟注所需金额 + 上一次加注金额
+            raiseInput.min = String(minRaiseIncrement);
+            raiseInput.max = String(chips);
 
             // 若筹码不足以达到“跟注额 + 最小增量”，加注按钮置灰
             raiseBtn.disabled = chips < (callNeed + lastInc);
@@ -977,8 +986,12 @@ class PokerGame {
             // 更新最小增量提示（同时展示“至少加到”目标总注）
             const hintEl = document.getElementById('min-increment-hint');
             if (hintEl) {
+                const minRaiseIncrement = this.getMinRaiseAmount();
+                const callAmount = Math.max(0, this.calculateCallAmount());
+                const lastInc = this.getLastIncrement(); // 上一次加注增量金额
+                const minRaiseAmount = callAmount + lastInc; // 最小加注额 = 跟注所需金额 + 上一次加注增量金额
                 const minTargetText = this.getMinRaiseTarget();
-                hintEl.textContent = `（最小增量：${lastInc}；加注是在跟注的基础上再增加的下注。）`;
+                hintEl.textContent = `（最小加注额${minRaiseAmount}：跟注所需金额${callAmount} + 上一次加注增量金额${lastInc}）`;
             }
         }
         if (allinBtn) {
@@ -1520,28 +1533,38 @@ class PokerGame {
         document.getElementById('call-btn')?.addEventListener('click', () => this.call());
         document.getElementById('raise-btn')?.addEventListener('click', () => {
             const inputEl = document.getElementById('raise-amount');
-            const raw = inputEl ? Number(inputEl.value || 0) : 0; // 目标总注（raise-to）
+            const actualRaiseAmount = inputEl ? Number(inputEl.value || 0) : 0; // 玩家实际输入的加注金额
             if (!this.gameState || !Array.isArray(this.gameState.players)) return;
 
             const me = this.gameState.players.find(p => p.user_id === this.user.user_id);
             if (!me) return;
             const chips = Number(me.chips || 0);
             const myBet = Number(me.current_bet || 0);
-            const minTarget = this.getMinRaiseTarget(); // 当前台面总注 + 最小增量
-
-            // 校验：目标总注不得低于“至少加到”
-            if (raw < minTarget) {
-                this.showToast(`至少加到 ${minTarget}`, 'error');
+            const callAmount = Math.max(0, this.calculateCallAmount());
+            const lastInc = this.getLastIncrement(); // 上一次加注增量金额
+            const minRaiseAmount = callAmount + lastInc; // 最小加注额 = 跟注所需金额 + 上一次加注增量金额
+            
+            // 校验：玩家实际输入的加注金额不得低于最小加注额
+            if (actualRaiseAmount < minRaiseAmount) {
+                this.showToast(`最小加注额为 ${minRaiseAmount}（跟注所需金额${callAmount} + 上一次加注金额${lastInc}）`, 'error');
                 return;
             }
-            // 我需要补的筹码 = 目标总注 - 我的当前总注
-            const need = Math.max(0, raw - myBet);
+            
+            // 计算加注增量 = 玩家实际输入的加注金额 - 跟注所需金额
+            const raiseIncrement = actualRaiseAmount - callAmount;
+            
+            // 计算目标总注 = 玩家当前下注额 + 玩家实际输入的加注金额
+            const targetTotalBet = myBet + actualRaiseAmount;
+            
+            // 校验：筹码是否足够
+            const need = Math.max(0, targetTotalBet - myBet);
             if (chips < need) {
                 this.showToast(`筹码不足：至少需要 ${need}`, 'error');
                 return;
             }
-            // 发送到后端的 amount 是“目标总注（raise-to）”
-            this.raise(raw);
+            
+            // 发送到后端的 amount 是"目标总注（raise-to）"
+            this.raise(targetTotalBet);
         });
 
         // 全下（不足额加注不重开行动由后端处理）

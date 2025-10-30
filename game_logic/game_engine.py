@@ -537,25 +537,39 @@ class TexasHoldemGame:
             if amount <= self.current_bet:
                 return {"success": False, "message": "加注金额必须大于当前下注"}
             
-            raise_amount = amount - player.current_bet
-            if not player.can_afford(raise_amount):
+            # 计算跟注所需金额
+            call_amount = self.current_bet - player.current_bet
+            
+            # 计算最小加注额 = 跟注所需金额 + 上一次加注增量金额
+            min_raise_amount = call_amount + self.last_raise_increment
+            
+            # 计算目标总注（玩家当前下注额 + 最小加注额）
+            min_target_total_bet = player.current_bet + min_raise_amount
+            
+            # 计算玩家实际输入的加注金额（目标总注 - 玩家当前下注额）
+            actual_raise_amount = amount - player.current_bet
+            
+            if not player.can_afford(actual_raise_amount):
                 return {"success": False, "message": "筹码不足"}
             
-            # 最低加注增量校验
-            increment = amount - self.current_bet
-            is_all_in = (raise_amount >= player.chips)
+            # 判断是否为全下
+            is_all_in = (actual_raise_amount >= player.chips)
             
-            # 如果不是全下，必须满足最低加注增量
-            if not is_all_in and self.last_raise_increment > 0 and increment < self.last_raise_increment:
-                return {"success": False, "message": f"加注增量不足，最少加注{self.last_raise_increment}"}
+            # 如果不是全下，必须满足最小加注金额要求
+            if not is_all_in and amount < min_target_total_bet:
+                return {"success": False, "message": f"加注金额不足，最少加注到{min_target_total_bet}"}
             
-            player.raise_bet(raise_amount)
-            self.pot += raise_amount
-            # 更新当前台面总注与最低加注增量
+            # 计算加注增量 = 玩家实际输入的加注金额 - 跟注所需金额
+            raise_increment = actual_raise_amount - call_amount
+            
+            player.raise_bet(actual_raise_amount)
+            self.pot += actual_raise_amount
+            # 更新当前台面总注
             self.current_bet = amount
             # 只有足额加注才更新最低增量，全下不更新
             if not is_all_in:
-                self.last_raise_increment = increment
+                # 更新最低加注增量为本次加注的实际增量
+                self.last_raise_increment = raise_increment
             # 加注后重置"已行动"集合，仅保留加注者（其他人需重新表态）
             self.acted_positions = {player.position}
             # 记录最后主动者（用于亮牌规则提示）
