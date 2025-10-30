@@ -1673,7 +1673,7 @@ class PokerGame {
         }
         // 刷新围坐显示
         this.gameState = null;
-        this.updateRoomPlayers();
+        await this.updateRoomPlayersForce();
     }
 
     // 重置筹码弹窗（范围选择+玩家昵称选择+验证码）
