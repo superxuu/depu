@@ -39,10 +39,21 @@
     backdrop-filter: blur(10px);
     display: flex;
     flex-direction: row;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
     align-items: center;
     justify-content: center;
     border-top: 1px solid rgba(255,255,255,0.12);
+  }
+  
+  /* 手机端文字提示在所有按钮下方 */
+  #min-increment-hint {
+    width: 100%;
+    text-align: right;
+    margin-top: 8px;
+    font-size: 14px;
+    order: 999; /* 确保文字在最后显示 */
+    flex-basis: 100%; /* 强制文字换行显示 */
   }
 
   /* 摊牌浮层：已固定底部，这里确保覆盖 */

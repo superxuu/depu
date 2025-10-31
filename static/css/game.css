@@ -485,6 +485,14 @@
     align-items: center;
 }
 
+#min-increment-hint {
+    display: block;
+    text-align: right;
+    width: 100%;
+    margin-top: 5px;
+    min-height: 20px;
+}
+
 #raise-amount {
     padding: 10px;
     border: 2px solid #ddd;
@@ -654,8 +662,8 @@
     }
     
     .raise-section {
-        flex-direction: column;
-        width: 100%;
+        flex-direction: row;
+        width: auto;
     }
     
     #raise-amount {
@@ -845,11 +853,48 @@
         background: rgba(20, 20, 20, 0.65);
         backdrop-filter: blur(10px);
         display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: center;
+        border-top: 1px solid rgba(255,255,255,0.12);
+    }
+    
+    /* 手机端按钮水平排列 */
+    .game-action-section .action-buttons {
+        display: flex;
         flex-direction: row;
-        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+    }
+    
+    /* 手机端按钮容器 */
+    .game-action-section .action-buttons-container {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+    }
+    
+    /* 手机端文字提示在所有按钮下方 */
+    #min-increment-hint {
+        width: 100%;
+        text-align: right;
+        margin-top: 8px;
+        font-size: 14px;
+        order: 999; /* 确保文字在最后显示 */
+    }
+    
+    /* 手机端加注区域 */
+    .game-action-section .raise-section {
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
         align-items: center;
         justify-content: center;
-        border-top: 1px solid rgba(255,255,255,0.12);
     }
 
     .action-btn {

@@ -991,7 +991,12 @@ class PokerGame {
                 const lastInc = this.getLastIncrement(); // 上一次加注增量金额
                 const minRaiseAmount = callAmount + lastInc; // 最小加注额 = 跟注所需金额 + 上一次加注增量金额
                 const minTargetText = this.getMinRaiseTarget();
-                hintEl.textContent = `（最小加注额${minRaiseAmount}：跟注所需金额${callAmount} + 上一次加注增量金额${lastInc}）`;
+                if (isCurrentPlayer) {
+                    hintEl.textContent = `（最小加注额${minRaiseAmount}：跟注所需金额${callAmount} + 上一次加注增量金额${lastInc}）`;
+                    hintEl.style.display = 'block';
+                } else {
+                    hintEl.style.display = 'none';
+                }
             }
         }
         if (allinBtn) {
@@ -1628,6 +1633,12 @@ class PokerGame {
         // 只禁用“游戏操作区”的按钮，避免误伤准备区按钮
         const buttons = document.querySelectorAll('#game-action-section .action-btn');
         buttons.forEach(btn => btn.disabled = true);
+        
+        // 隐藏加注提示文字
+        const hintEl = document.getElementById('min-increment-hint');
+        if (hintEl) {
+            hintEl.style.display = 'none';
+        }
     }
     
     enableActionButtons() {
