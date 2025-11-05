@@ -1033,12 +1033,22 @@ class TexasHoldemGame:
             
             players_with_status.append(player_dict_copy)
 
+        # 获取大小盲位置信息
+        small_blind_pos = self.player_manager.get_small_blind_position()
+        big_blind_pos = self.player_manager.get_big_blind_position()
+        
         return {
             "stage": self.stage.value,  # 小写阶段字符串，便于前端渲染
             "community_cards": [card.to_dict() for card in self.community_cards],
             "pot": self.pot,
             "current_bet": self.current_bet,
             "dealer_position": self.player_manager.dealer_position,
+            # 大小盲位置信息
+            "small_blind_position": small_blind_pos,
+            "big_blind_position": big_blind_pos,
+            # 盲注金额信息
+            "small_blind": self.min_bet // 2,
+            "big_blind": self.min_bet,
             # 兼容字段：保留已有 current_player（位置号），并补充更明确的两个字段
             "current_player": self.current_player_position,            # 位置号（向后兼容）
             "current_player_position": self.current_player_position,   # 位置号（显式）
@@ -1054,7 +1064,9 @@ class TexasHoldemGame:
             "time_remaining": time_remaining,      # 剩余时间（秒）
             "is_timeout": self.is_action_timeout(),  # 是否已超时
             # 单玩家等待状态
-            "single_player_waiting": self.single_player_waiting
+            "single_player_waiting": self.single_player_waiting,
+            # 已行动玩家位置列表（用于显示玩家动作）
+            "acted_positions": list(self.acted_positions)
         }
     
     def is_action_timeout(self) -> bool:

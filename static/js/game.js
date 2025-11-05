@@ -196,7 +196,24 @@ class PokerGame {
             if (resp.ok) {
                 const js = await resp.json();
                 if (js && js.game_state) {
+                    // 保存当前的盲注位置信息
+                    const currentSmallBlindPos = this.gameState?.small_blind_position;
+                    const currentBigBlindPos = this.gameState?.big_blind_position;
+                    
+                    // 更新游戏状态
                     this.gameState = js.game_state;
+                    
+                    // 如果新状态中没有盲注位置信息，但之前有，则恢复之前的盲注位置
+                    if (!this.gameState.small_blind_position && currentSmallBlindPos) {
+                        this.gameState.small_blind_position = currentSmallBlindPos;
+                    }
+                    if (!this.gameState.big_blind_position && currentBigBlindPos) {
+                        this.gameState.big_blind_position = currentBigBlindPos;
+                    }
+                    
+                    // 确保盲注位置信息正确设置
+                    this.ensureBlindPositionsSet();
+                    
                     // 用权威状态立即渲染玩家和阶段（显示庄家 D）
                     const stage = this.normalizeStage(this.gameState?.stage || 'waiting');
                     this.updateGameStage(stage);
@@ -205,28 +222,89 @@ class PokerGame {
             }
         } catch (e) {
         }
-        
-        this.showToast('连接成功', 'success');
-    }
-    
-    handleGameState(gameState) {
-        this.gameState = gameState;
-        this.renderGameState();
     }
     
     handleGameStateUpdate(gameState) {
+        // 保存当前的盲注位置信息和庄家位置信息（在更新gameState之前）
+        const currentSmallBlindPos = this.gameState?.small_blind_position;
+        const currentBigBlindPos = this.gameState?.big_blind_position;
+        const currentDealerPos = this.gameState?.dealer_position;
+        const currentSmallBlind = this.gameState?.small_blind;
+        const currentBigBlind = this.gameState?.big_blind;
+        const currentStage = this.gameState?.stage; // 保存stage信息
+        
+        // 更新游戏状态
         this.gameState = gameState;
         
-        // 重要：同步更新玩家数据，确保赢家标志正确显示
-        this.latestPlayersData = { players: gameState.players };
-        
-        // 检查游戏阶段，如果是结束阶段，不调用renderGameState以避免覆盖准备按钮
+        // 检查游戏阶段
         const stage = this.normalizeStage(gameState.stage);
+        
+        // 如果新状态中没有stage，但之前有，则恢复之前的stage（防止stage被错误设置为waiting）
+        // 使用normalizeStage后的值进行比较
+        const normalizedCurrentStage = currentStage ? this.normalizeStage(currentStage) : null;
+        if ((stage === 'waiting' || !gameState.stage) && 
+            normalizedCurrentStage && normalizedCurrentStage !== 'waiting' && normalizedCurrentStage !== 'ended') {
+            // 恢复之前保存的原始stage值
+            this.gameState.stage = currentStage;
+        }
+        
+        // 重要：在调用 ensureBlindPositionsSet 之前，先恢复之前保存的盲注位置信息
+        // 这样可以确保即使新状态中没有这些信息，也能保留之前的值
+        // 如果新状态中有这些信息，则优先使用新状态的信息
+        // 注意：使用 !== undefined 和 !== null 检查，确保能正确检测到缺失的值
+        if ((this.gameState.small_blind_position === undefined || this.gameState.small_blind_position === null) && 
+            currentSmallBlindPos !== undefined && currentSmallBlindPos !== null) {
+            this.gameState.small_blind_position = currentSmallBlindPos;
+        }
+        if ((this.gameState.big_blind_position === undefined || this.gameState.big_blind_position === null) && 
+            currentBigBlindPos !== undefined && currentBigBlindPos !== null) {
+            this.gameState.big_blind_position = currentBigBlindPos;
+        }
+        if ((this.gameState.dealer_position === undefined || this.gameState.dealer_position === null) && 
+            currentDealerPos !== undefined && currentDealerPos !== null) {
+            this.gameState.dealer_position = currentDealerPos;
+        }
+        if (this.gameState.small_blind === undefined && currentSmallBlind !== undefined) {
+            this.gameState.small_blind = currentSmallBlind;
+        }
+        if (this.gameState.big_blind === undefined && currentBigBlind !== undefined) {
+            this.gameState.big_blind = currentBigBlind;
+        }
+        
+        // 重要：同步更新玩家数据，确保庄家、大小盲、操作信息正确显示
+        // 但需要保留之前玩家的position信息，防止丢失
+        const previousPlayers = this.latestPlayersData?.players || this.gameState?.players || [];
+        const previousPlayersMap = new Map();
+        previousPlayers.forEach(p => {
+            if (p && p.user_id && p.position !== undefined) {
+                previousPlayersMap.set(p.user_id, p.position);
+            }
+        });
+        
+        // 确保新玩家数据有position字段
+        const playersWithPosition = (gameState.players || []).map(player => {
+            if (player && !player.position && previousPlayersMap.has(player.user_id)) {
+                player.position = previousPlayersMap.get(player.user_id);
+            }
+            return player;
+        });
+        
+        // 同时更新gameState.players，确保后续渲染使用正确的数据
+        gameState.players = playersWithPosition;
+        
+        this.latestPlayersData = { players: playersWithPosition };
+        
+        // 确保盲注位置信息正确设置（这个方法会尝试从玩家数据中推导，如果后端没有提供）
+        // 但只有在后端没有提供且我们之前也没有保存的情况下才会重新计算
+        this.ensureBlindPositionsSet();
+        
+        // 检查游戏阶段
+        const finalStage = this.normalizeStage(this.gameState.stage);
         
         // 检查单玩家等待状态（只在有游戏进行中时检查）
         // 只有当single_player_waiting存在且当前用户是等待用户时才显示弹框
         // 同时检查在线玩家数量，避免在多人游戏时错误显示弹框
-        if (stage && stage !== 'ended' && stage !== 'waiting' && 
+        if (finalStage && finalStage !== 'ended' && finalStage !== 'waiting' && 
             gameState.single_player_waiting && 
             gameState.single_player_waiting.user_id === this.user?.user_id) {
             
@@ -249,19 +327,21 @@ class PokerGame {
         // 重要：在游戏状态更新时，立即渲染玩家个人手牌
         this.renderPlayerHoleCardsFromGameState();
         
-        if (stage !== 'ended') {
+        // 无论什么阶段，都强制渲染玩家信息，确保庄家、大小盲、操作信息正确显示
+        this.renderPlayers();
+        
+        if (finalStage !== 'ended') {
             this.renderGameState();
         } else {
             // 游戏结束阶段，只更新必要的UI元素，并强制显示准备区
             this.renderCommunityCards();
-            this.renderPlayers();
             this.renderPot();
-            this.updateGameStage(stage);
+            this.updateGameStage(finalStage);
             // 强制切换到准备区，避免因消息顺序导致按钮不出现
             this.toggleGameActions(false);
         }
         // 摊牌/结束阶段渲染明牌
-        if (stage === 'showdown' || stage === 'ended') {
+        if (finalStage === 'showdown' || finalStage === 'ended') {
             this.renderShowdownReveal(this.gameState);
         }
     }
@@ -381,19 +461,89 @@ class PokerGame {
     async handleGameStarted(payload) {
         const ov = document.getElementById('showdown-reveal');
         if (ov) ov.remove();
-        // 优先使用服务端随附的权威状态
+        // 使用服务端随附的权威状态（包含庄家、大小盲信息）
         if (payload && payload.data) {
+            // 保存当前的盲注位置信息
+            const currentSmallBlindPos = this.gameState?.small_blind_position;
+            const currentBigBlindPos = this.gameState?.big_blind_position;
+            
+            // 更新游戏状态
             this.gameState = payload.data;
+            
+            // 如果新状态中没有盲注位置信息，但之前有，则恢复之前的盲注位置
+            if (!this.gameState.small_blind_position && currentSmallBlindPos) {
+                this.gameState.small_blind_position = currentSmallBlindPos;
+            }
+            if (!this.gameState.big_blind_position && currentBigBlindPos) {
+                this.gameState.big_blind_position = currentBigBlindPos;
+            }
+            
+            // 确保设置大小盲位置
+            this.ensureBlindPositionsSet();
+            
+            // 重要：更新latestPlayersData，确保renderPlayers使用正确的游戏状态数据
+            this.latestPlayersData = { players: this.gameState.players };
+            
+            // 游戏开始后立即清除准备状态，确保显示正确的游戏信息
+            if (this.gameState.players) {
+                this.gameState.players.forEach(player => {
+                    player.is_ready = false; // 清除准备状态
+                });
+            }
+            
+            // 立即渲染游戏状态，显示庄家、大小盲等信息
+            this.renderGameState();
+            
+            // 依据当前状态更新阶段显示并立刻渲染玩家（以显示庄家 D）
+            const stage = this.normalizeStage(this.gameState?.stage || 'preflop');
+            this.updateGameStage(stage);
+            this.renderPlayers();
         } else {
             // 兜底：立即从后端获取当前房间状态，拿到 dealer_position 等权威信息
             try {
                 const resp = await fetch('/api/room/status');
                 if (resp.ok) {
                     const js = await resp.json();
-                    if (js && js.game_state) this.gameState = js.game_state;
+                    if (js && js.game_state) {
+                        // 保存当前的盲注位置信息
+                        const currentSmallBlindPos = this.gameState?.small_blind_position;
+                        const currentBigBlindPos = this.gameState?.big_blind_position;
+                        
+                        // 更新游戏状态
+                        this.gameState = js.game_state;
+                        
+                        // 如果新状态中没有盲注位置信息，但之前有，则恢复之前的盲注位置
+                        if (!this.gameState.small_blind_position && currentSmallBlindPos) {
+                            this.gameState.small_blind_position = currentSmallBlindPos;
+                        }
+                        if (!this.gameState.big_blind_position && currentBigBlindPos) {
+                            this.gameState.big_blind_position = currentBigBlindPos;
+                        }
+                        
+                        // 确保设置大小盲位置
+                        this.ensureBlindPositionsSet();
+                        
+                        // 重要：更新latestPlayersData，确保renderPlayers使用正确的游戏状态数据
+                        this.latestPlayersData = { players: this.gameState.players };
+                        
+                        // 游戏开始后立即清除准备状态
+                        if (this.gameState.players) {
+                            this.gameState.players.forEach(player => {
+                                player.is_ready = false; // 清除准备状态
+                            });
+                        }
+                        
+                        // 强制延迟渲染
+                        setTimeout(() => {
+                            this.renderGameState();
+                            const stage = this.normalizeStage(this.gameState?.stage || 'preflop');
+                            this.updateGameStage(stage);
+                            this.renderPlayers();
+                        }, 50);
+                    }
                 }
             } catch (e) {
-
+                console.error('Error fetching game state:', e);
             }
         }
         this.showToast('游戏开始！', 'success');
@@ -401,10 +551,6 @@ class PokerGame {
         // 清除上一局的赢家信息，因为新游戏开始了
         this.lastGameWinners = [];
         
-        // 依据当前状态更新阶段显示并立刻渲染玩家（以显示庄家 D）
-        const stage = this.normalizeStage(this.gameState?.stage || 'preflop');
-        this.updateGameStage(stage);
-        this.renderPlayers();
         // 游戏开始，切换到游戏操作按钮
         this.toggleGameActions(true);
     }
@@ -484,6 +630,11 @@ class PokerGame {
     handlePlayersStatusUpdate(data) {
         // 处理玩家状态更新消息，保存最新数据并立即刷新玩家列表显示
         this.latestPlayersData = data;
+        
+        // 确保盲注位置信息正确设置
+        this.ensureBlindPositionsSet();
+        
+        // 渲染玩家信息
         this.renderPlayers();
     }
     
@@ -823,10 +974,12 @@ class PokerGame {
     async renderPlayers() {
         const playersContainer = document.getElementById('players-container');
         if (!playersContainer) {
-    
             return;
         }
-        playersContainer.innerHTML = '';
+        
+        // 确保盲注位置信息正确设置
+        this.ensureBlindPositionsSet();
+        
         // 预计算用于渲染的庄家位置（优先使用后端提供，其次用小盲推导）
         this.dealerPositionForRender = this.computeDealerPositionForRender();
 
@@ -835,6 +988,38 @@ class PokerGame {
         // 优先使用WebSocket消息中的实时玩家数据
         if (this.latestPlayersData && this.latestPlayersData.players) {
             players = this.latestPlayersData.players;
+            
+            // 确保latestPlayersData中的玩家有position字段，如果没有则从gameState.players中恢复
+            if (this.gameState && this.gameState.players && Array.isArray(this.gameState.players)) {
+                const gameStatePlayersMap = new Map();
+                this.gameState.players.forEach(p => {
+                    if (p && p.user_id && p.position !== undefined) {
+                        gameStatePlayersMap.set(p.user_id, p.position);
+                    }
+                });
+                
+                let needsUpdate = false;
+                players = players.map(player => {
+                    if (player && (!player.position || player.position === undefined) && gameStatePlayersMap.has(player.user_id)) {
+                        player.position = gameStatePlayersMap.get(player.user_id);
+                        needsUpdate = true;
+                    }
+                    return player;
+                });
+                
+                // 如果更新了position，同时更新latestPlayersData和gameState.players
+                if (needsUpdate) {
+                    this.latestPlayersData.players = players;
+                    // 同时更新gameState.players中对应的玩家
+                    this.gameState.players = this.gameState.players.map(p => {
+                        const updatedPlayer = players.find(lp => lp.user_id === p.user_id);
+                        if (updatedPlayer && updatedPlayer.position) {
+                            p.position = updatedPlayer.position;
+                        }
+                        return p;
+                    });
+                }
+            }
         } else {
             // 兜底：从API获取最新的玩家数据
             try {
@@ -843,6 +1028,23 @@ class PokerGame {
                     const data = await response.json();
                     // 不过滤离线玩家，显示所有玩家但通过样式区分连接状态
                     players = data.players || [];
+                    
+                    // 重要：如果从API获取的数据缺少position字段，尝试从gameState.players中恢复
+                    if (this.gameState && this.gameState.players && Array.isArray(this.gameState.players)) {
+                        const gameStatePlayersMap = new Map();
+                        this.gameState.players.forEach(p => {
+                            if (p && p.user_id && p.position !== undefined) {
+                                gameStatePlayersMap.set(p.user_id, p.position);
+                            }
+                        });
+                        
+                        players = players.map(player => {
+                            if (player && !player.position && gameStatePlayersMap.has(player.user_id)) {
+                                player.position = gameStatePlayersMap.get(player.user_id);
+                            }
+                            return player;
+                        });
+                    }
                 } else {
                     // 即使API失败也要继续，至少清空列表
                     players = [];
@@ -852,6 +1054,35 @@ class PokerGame {
                 // 继续执行，不返回
                 players = [];
             }
+        }
+        
+        // 最后确保：如果玩家数据仍然缺少position，尝试从gameState.players中获取
+        if (players.length > 0 && this.gameState && this.gameState.players && Array.isArray(this.gameState.players)) {
+            const gameStatePlayersMap = new Map();
+            this.gameState.players.forEach(p => {
+                if (p && p.user_id && p.position !== undefined) {
+                    gameStatePlayersMap.set(p.user_id, p.position);
+                }
+            });
+            
+            players = players.map(player => {
+                if (player && (!player.position || player.position === undefined) && gameStatePlayersMap.has(player.user_id)) {
+                    player.position = gameStatePlayersMap.get(player.user_id);
+                }
+                return player;
+            });
+        }
+
+        // 检查是否需要完全重新渲染（玩家数量变化或游戏阶段变化）
+        const existingPlayers = playersContainer.querySelectorAll('.player-circle');
+        const currentStage = this.normalizeStage(this.gameState?.stage || 'waiting');
+        const needsFullRerender = existingPlayers.length !== players.length || 
+                                 currentStage === 'waiting' || 
+                                 currentStage === 'ended';
+        
+        
+        if (needsFullRerender) {
+            playersContainer.innerHTML = '';
         }
 
         if (players.length > 0) {
@@ -869,6 +1100,17 @@ class PokerGame {
                         ? (index - currentPlayerIndex + sortedPlayers.length) % sortedPlayers.length
                         : index;
                     
+                    // 如果不需要完全重新渲染，尝试更新现有元素
+                    if (!needsFullRerender) {
+                        const existingPlayerEl = playersContainer.querySelector(`[data-user-id="${player.user_id}"]`);
+                        if (existingPlayerEl) {
+                            // 更新现有元素
+                            this.updatePlayerCircleElement(existingPlayerEl, player, relativeIndex, sortedPlayers.length);
+                            return;
+                        }
+                    }
+                    
+                    // 创建新元素
                     const playerEl = this.createPlayerCircleElement(player, relativeIndex, sortedPlayers.length);
                     playersContainer.appendChild(playerEl);
                 } catch (error) {
@@ -1047,20 +1289,38 @@ class PokerGame {
         // 庄家徽标（D）- 优先使用后端字段，缺失则使用兜底推导
         const dealerPos = Number(this.gameState?.dealer_position || 0) || Number(this.dealerPositionForRender || 0);
         const isDealer = dealerPos && Number(dealerPos) === Number(player.position);
-        const dealerBadge = isDealer ? `<div class="dealer-badge" title="庄家" style="display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:#ffb300;color:#000;font-weight:bold;font-size:12px;margin-left:6px;">D</div>` : '';
+        const stage = this.normalizeStage(this.gameState?.stage || 'waiting');
+        // 游戏开始后（非等待阶段）一直显示庄家标识
+        const dealerBadge = (stage !== 'waiting' && isDealer) ? `<div class="dealer-badge" title="庄家">D</div>` : '';
+        
+        // 盲注标识（SB/BB）- 游戏开始后一直显示
+        let smallBlindBadge = '';
+        let bigBlindBadge = '';
+        
+        // 游戏开始后（非等待阶段）一直显示盲注标识
+        if (stage !== 'waiting') {
+            // 小盲注标识
+            const smallBlindPos = this.getSmallBlindPosition();
+            const isSmallBlind = smallBlindPos && Number(smallBlindPos) === Number(player.position);
+            smallBlindBadge = isSmallBlind ? `<div class="small-blind-badge" title="小盲注">小盲</div>` : '';
+            
+            // 大盲注标识
+            const bigBlindPos = this.getBigBlindPosition();
+            const isBigBlind = bigBlindPos && Number(bigBlindPos) === Number(player.position);
+            bigBlindBadge = isBigBlind ? `<div class="big-blind-badge" title="大盲注">大盲</div>` : '';
+        }
         
         // 离线状态标识
         const offlineBadge = !isConnected ? 
             `<div class="offline-badge" title="离线">⚫</div>` : '';
         
-        // 准备状态指示器
-        const readyIndicator = player.is_ready ? 
+        // 准备状态指示器 - 游戏进行中时不显示准备状态
+        const readyIndicator = (player.is_ready && (!this.gameState || !this.gameState.stage || this.gameState.stage === 'waiting' || this.gameState.stage === 'ended')) ? 
             `<div class="ready-indicator" title="已准备">✓</div>` : '';
         
         // 胜利状态 - 在游戏结束后阶段持续显示赢家圆圈效果，直到玩家点击准备按钮
         let isWinner = player.win;
         // 如果游戏已经结束，检查保存的赢家信息（赢家圆圈效果持续显示直到玩家点击准备）
-        const stage = this.normalizeStage(this.gameState?.stage || 'waiting');
         if (stage === 'ended' && this.lastGameWinners.includes(player.user_id)) {
             isWinner = true;
         }
@@ -1071,15 +1331,8 @@ class PokerGame {
         } else {
             playerEl.classList.remove('winner');
         }
-        // 操作徽标（最近一次操作）
-        const actionMap = { 'check': '过牌', 'call': '跟注', 'raise': '加注', 'fold': '弃牌', 'sb': '小盲', 'bb': '大盲' };
-        let actionText = '';
-        if (player && player.is_all_in) {
-            actionText = 'ALL-IN';
-        } else if (player && player.last_action && actionMap[player.last_action]) {
-            actionText = actionMap[player.last_action];
-        }
-        const actionBadge = actionText ? `<div class="action-badge" style="display:inline-block;padding:2px 6px;border-radius:10px;background:rgba(255,255,255,0.85);color:#000;font-size:12px;margin-top:4px;">${actionText}</div>` : '';
+
+        
         // 手牌净变化（仅在非0时展示）- 在游戏结束后阶段持续显示赢家的筹码变化
         let showDelta = (typeof player.hand_delta === 'number' && player.hand_delta !== 0);
         let deltaValue = player.hand_delta;
@@ -1101,11 +1354,12 @@ class PokerGame {
         
         playerEl.innerHTML = `
             <div class="player-nickname">${player.nickname}${dealerBadge}${offlineBadge}</div>
+            ${smallBlindBadge}
+            ${bigBlindBadge}
             <div class="player-chips-circle">${player.chips}</div>
             ${deltaHtml}
-            ${player.current_bet > 0 ? `<div class="player-bet-circle">下注: ${player.current_bet}</div>` : ''}
+            ${this.shouldShowBetCircle(player) ? `<div class="player-bet-circle">${this.getPlayerActionText(player)}${this.getBetAmountText(player)}</div>` : ''}
             <div class="player-status-circle">${this.getPlayerStatusText(player)}</div>
-            ${actionBadge}
             ${readyIndicator}
         `;
         
@@ -1113,6 +1367,96 @@ class PokerGame {
         playerEl.setAttribute('data-user-id', player.user_id);
         
         return playerEl;
+    }
+    
+    // 更新现有的玩家圆圈元素
+    updatePlayerCircleElement(playerEl, player, index, totalPlayers) {
+        // 获取玩家连接状态
+        const isConnected = player.connected === true;
+        
+        // 更新CSS类
+        playerEl.className = `player-circle 
+                            ${player.user_id === this.user.user_id ? 'current-player' : ''} 
+                            ${player.is_folded ? 'folded' : ''} 
+                            ${player.is_current_turn ? 'current-turn' : ''}
+                            ${player.is_all_in ? 'all-in' : ''}
+                            ${player.is_ready ? 'ready' : ''}
+                            ${player.win ? 'winner' : ''}
+                            ${!isConnected ? 'offline' : ''}`;
+        
+        // 如果是当前玩家，更新个人牌显示
+        if (player.user_id === this.user.user_id && player.hole_cards && player.hole_cards.length > 0) {
+            this.renderPlayerHoleCards(player.hole_cards);
+        }
+        
+        // 庄家徽标逻辑
+        const dealerPos = Number(this.gameState?.dealer_position || 0) || Number(this.dealerPositionForRender || 0);
+        const isDealer = dealerPos && Number(dealerPos) === Number(player.position);
+        const stage = this.normalizeStage(this.gameState?.stage || 'waiting');
+        const dealerBadge = (stage !== 'waiting' && isDealer) ? `<div class="dealer-badge" title="庄家">D</div>` : '';
+        
+        // 盲注标识
+        let smallBlindBadge = '';
+        let bigBlindBadge = '';
+        if (stage !== 'waiting') {
+            const smallBlindPos = this.getSmallBlindPosition();
+            const isSmallBlind = smallBlindPos && Number(smallBlindPos) === Number(player.position);
+            smallBlindBadge = isSmallBlind ? `<div class="small-blind-badge" title="小盲注">小盲</div>` : '';
+            
+            const bigBlindPos = this.getBigBlindPosition();
+            const isBigBlind = bigBlindPos && Number(bigBlindPos) === Number(player.position);
+            bigBlindBadge = isBigBlind ? `<div class="big-blind-badge" title="大盲注">大盲</div>` : '';
+        }
+        
+        // 离线状态标识
+        const offlineBadge = !isConnected ? 
+            `<div class="offline-badge" title="离线">⚫</div>` : '';
+        
+        // 准备状态指示器 - 游戏进行中时不显示准备状态
+        const readyIndicator = (player.is_ready && (!this.gameState || !this.gameState.stage || this.gameState.stage === 'waiting' || this.gameState.stage === 'ended')) ? 
+            `<div class="ready-indicator" title="已准备">✓</div>` : '';
+        
+        // 胜利状态
+        let isWinner = player.win;
+        if (stage === 'ended' && this.lastGameWinners.includes(player.user_id)) {
+            isWinner = true;
+        }
+        
+        // 更新winner类
+        if (isWinner) {
+            playerEl.classList.add('winner');
+        } else {
+            playerEl.classList.remove('winner');
+        }
+        
+        // 手牌净变化
+        let showDelta = (typeof player.hand_delta === 'number' && player.hand_delta !== 0);
+        let deltaValue = player.hand_delta;
+        if (stage === 'ended' && this.lastGameWinners.includes(player.user_id)) {
+            const savedDelta = this.lastGameWinnerDeltas[player.user_id];
+            if (savedDelta !== undefined && savedDelta !== 0) {
+                showDelta = true;
+                deltaValue = savedDelta;
+            }
+        }
+        
+        const deltaHtml = showDelta
+            ? `<div class="player-delta ${deltaValue > 0 ? 'pos' : 'neg'}">
+                   ${deltaValue > 0 ? '+' : ''}${deltaValue}
+               </div>`
+            : '';
+        
+        // 更新HTML内容
+        playerEl.innerHTML = `
+            <div class="player-nickname">${player.nickname}${dealerBadge}${offlineBadge}</div>
+            ${smallBlindBadge}
+            ${bigBlindBadge}
+            <div class="player-chips-circle">${player.chips}</div>
+            ${deltaHtml}
+            ${this.shouldShowBetCircle(player) ? `<div class="player-bet-circle">${this.getPlayerActionText(player)}${this.getBetAmountText(player)}</div>` : ''}
+            <div class="player-status-circle">${this.getPlayerStatusText(player)}</div>
+            ${readyIndicator}
+        `;
     }
     
     // 在专门的个人牌显示区域渲染玩家个人牌
@@ -1189,12 +1533,160 @@ class PokerGame {
     }
     
     getPlayerStatusText(player) {
-        if (player.is_folded) return '已弃牌';
-        if (player.is_all_in) return '全下';
-        if (player.is_current_turn) return '行动中';
-        if (player.is_ready) return '已准备';
+        // 游戏进行中时，优先显示游戏相关状态，而不是准备状态
+        if (this.gameState && this.gameState.stage && this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
+            if (player.is_folded) return '已弃牌';
+            if (player.is_all_in) return '全下';
+            if (player.is_current_turn) return '行动中';
+            // 游戏进行中时不显示"已准备"状态
+        } else {
+            // 等待阶段显示准备状态
+            if (player.is_ready) return '已准备';
+        }
         return '';
     }
+
+    getPlayerActionText(player) {
+        // 优先级1：ALL-IN状态
+        if (player && player.is_all_in) {
+            return 'ALL-IN';
+        }
+        // 优先级2：弃牌状态
+        else if (player && player.is_folded) {
+            return '弃牌';
+        }
+        // 优先级3：last_action字段
+        else if (player && player.last_action) {
+            const actionMap = { 'check': '过牌', 'call': '跟注', 'raise': '加注', 'fold': '弃牌', 'sb': '小盲', 'bb': '大盲' };
+            return actionMap[player.last_action] || '下注';
+        }
+        // 优先级4：通过current_bet判断操作类型
+        else if (player && player.current_bet > 0) {
+            const gameState = this.gameState;
+            if (gameState && gameState.current_bet) {
+                if (player.current_bet === gameState.current_bet) {
+                    return '跟注';
+                } else if (player.current_bet > gameState.current_bet) {
+                    return '加注';
+                }
+            }
+        }
+        // 优先级5：如果玩家没有下注但游戏正在进行，可能是过牌
+        else if (player && player.current_bet === 0 && this.gameState && this.gameState.stage && this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
+            // 检查玩家是否已经行动过（通过acted_positions判断）
+            const actedPositions = this.gameState.acted_positions || [];
+            if (actedPositions.includes(player.position)) {
+                return '过牌';
+            }
+        }
+        
+        // 默认返回"下注"
+        return '下注';
+    }
+
+    shouldShowAction(player) {
+        // 如果玩家有last_action，需要显示操作
+        if (player && player.last_action) {
+            return true;
+        }
+        // 如果玩家已经行动过（在acted_positions中），需要显示操作
+        if (this.gameState && this.gameState.acted_positions) {
+            const actedPositions = this.gameState.acted_positions || [];
+            if (actedPositions.includes(player.position)) {
+                return true;
+            }
+        }
+        // 如果游戏正在进行且玩家有操作需要显示
+        if (this.gameState && this.gameState.stage && this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
+            // 检查玩家是否有需要显示的操作
+            const actionText = this.getPlayerActionText(player);
+            return actionText !== '下注' && actionText !== '';
+        }
+        return false;
+    }
+
+    shouldShowBetCircle(player) {
+        // 弃牌玩家需要显示操作
+        if (player && player.is_folded) {
+            return true;
+        }
+        // 有下注金额的玩家需要显示操作
+        if (player && player.current_bet > 0) {
+            return true;
+        }
+        // 有last_action的玩家需要显示操作
+        if (player && player.last_action) {
+            return true;
+        }
+        // 已经行动过的玩家需要显示操作
+        if (this.gameState && this.gameState.acted_positions) {
+            const actedPositions = this.gameState.acted_positions || [];
+            if (actedPositions.includes(player.position)) {
+                return true;
+            }
+        }
+        // 游戏开始时，大小盲玩家需要显示操作圆圈（即使还没有行动）
+        if (this.gameState && this.gameState.stage && this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
+            const smallBlindPos = this.getSmallBlindPosition();
+            const bigBlindPos = this.getBigBlindPosition();
+            const isSmallBlind = smallBlindPos && Number(smallBlindPos) === Number(player.position);
+            const isBigBlind = bigBlindPos && Number(bigBlindPos) === Number(player.position);
+            
+            if (isSmallBlind || isBigBlind) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    getBetAmountText(player) {
+        if (!player) return '';
+        
+        // 弃牌玩家不显示金额
+        if (player.is_folded) return '';
+        
+        // ALL-IN玩家显示"ALL-IN"
+        if (player.is_all_in) return '';
+        
+        // 有下注金额的玩家显示金额
+        if (player.current_bet > 0) {
+            return ` ${player.current_bet}`;
+        }
+        
+        // 盲注玩家显示盲注金额
+        if (player.last_action === 'sb' || player.last_action === 'bb') {
+            const gameState = this.gameState;
+            if (gameState) {
+                if (player.last_action === 'sb' && gameState.small_blind) {
+                    return ` ${gameState.small_blind}`;
+                } else if (player.last_action === 'bb' && gameState.big_blind) {
+                    return ` ${gameState.big_blind}`;
+                }
+            }
+        }
+        
+        // 游戏开始时，大小盲玩家显示盲注金额（即使没有last_action或current_bet）
+        if (this.gameState && this.gameState.stage && this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
+            const smallBlindPos = this.getSmallBlindPosition();
+            const bigBlindPos = this.getBigBlindPosition();
+            const isSmallBlind = smallBlindPos && Number(smallBlindPos) === Number(player.position);
+            const isBigBlind = bigBlindPos && Number(bigBlindPos) === Number(player.position);
+            
+            if (isSmallBlind) {
+                // 小盲玩家显示小盲金额
+                const smallBlindAmount = this.gameState.small_blind || 5; // 默认5
+                return ` ${smallBlindAmount}`;
+            } else if (isBigBlind) {
+                // 大盲玩家显示大盲金额
+                const bigBlindAmount = this.gameState.big_blind || 10; // 默认10
+                return ` ${bigBlindAmount}`;
+            }
+        }
+        
+        return '';
+    }
+
+
     
     getSuitSymbol(suit) {
         const symbols = {
@@ -1274,6 +1766,220 @@ class PokerGame {
         }
 
         // 5) 无法推导则不显示
+        return 0;
+    }
+
+    // 确保设置大小盲位置
+    ensureBlindPositionsSet() {
+        if (!this.gameState || !this.gameState.players) return;
+        
+        // 如果后端已经提供了大小盲位置，直接使用
+        // 注意：使用 !== undefined 和 !== null 检查，因为 0 也是有效的位置值
+        if (this.gameState.small_blind_position !== undefined && 
+            this.gameState.small_blind_position !== null &&
+            this.gameState.big_blind_position !== undefined && 
+            this.gameState.big_blind_position !== null) {
+            return;
+        }
+        
+        // 尝试从玩家数据中找到有小盲/大盲动作的玩家
+        const smallBlindPlayer = this.gameState.players.find(p => p && p.last_action === 'sb');
+        const bigBlindPlayer = this.gameState.players.find(p => p && p.last_action === 'bb');
+        
+        if (smallBlindPlayer && bigBlindPlayer) {
+            this.gameState.small_blind_position = Number(smallBlindPlayer.position || 0);
+            this.gameState.big_blind_position = Number(bigBlindPlayer.position || 0);
+            return;
+        }
+        
+        // 如果没有找到有小盲/大盲动作的玩家，尝试根据庄家位置计算
+        let dealerPos = Number(this.gameState?.dealer_position || 0);
+        
+        // 如果后端没有提供庄家位置，尝试从玩家数据中推导
+        if (!dealerPos) {
+            dealerPos = this.computeDealerPositionForRender();
+        }
+        
+        if (dealerPos) {
+            const activePlayers = this.gameState.players.filter(p => p && !p.is_folded);
+            const positions = activePlayers
+                .map(p => Number(p.position))
+                .filter(n => !isNaN(n))
+                .sort((a, b) => a - b);
+            
+            if (positions.length >= 2) {
+                const dealerIndex = positions.indexOf(dealerPos);
+                if (dealerIndex !== -1) {
+                    // 小盲注是庄家的下一位（顺时针）
+                    this.gameState.small_blind_position = positions[(dealerIndex + 1) % positions.length] || 0;
+                    // 大盲注是小盲注的下一位（顺时针）
+                    this.gameState.big_blind_position = positions[(dealerIndex + 2) % positions.length] || 0;
+                    return;
+                }
+            }
+        }
+        
+        // 如果以上方法都失败，尝试从玩家下注额推断大小盲位置
+        const activePlayers = this.gameState.players.filter(p => p && !p.is_folded);
+        
+        if (activePlayers.length >= 2) {
+            // 按下注额排序
+            const playersByBet = [...activePlayers].sort((a, b) => 
+                Number(a.current_bet || 0) - Number(b.current_bet || 0)
+            );
+            
+            // 如果有两个或更多玩家有下注，最小的下注是小盲，第二小的是大盲
+            const playersWithBets = playersByBet.filter(p => Number(p.current_bet || 0) > 0);
+            
+            if (playersWithBets.length >= 2) {
+                this.gameState.small_blind_position = Number(playersWithBets[0].position || 0);
+                this.gameState.big_blind_position = Number(playersWithBets[1].position || 0);
+                return;
+            } else if (playersWithBets.length === 1) {
+                // 只有一个玩家有下注，假设他是大盲
+                this.gameState.big_blind_position = Number(playersWithBets[0].position || 0);
+                
+                // 找一个没有下注的玩家作为小盲
+                const playerWithoutBet = activePlayers.find(p => Number(p.current_bet || 0) === 0);
+                if (playerWithoutBet) {
+                    this.gameState.small_blind_position = Number(playerWithoutBet.position || 0);
+                    return;
+                }
+            }
+        }
+        
+        // 最后兜底：使用活跃玩家的前两个位置
+        if (activePlayers.length >= 2) {
+            const positions = activePlayers
+                .map(p => Number(p.position))
+                .filter(n => !isNaN(n))
+                .sort((a, b) => a - b);
+            if (positions.length >= 2) {
+                this.gameState.small_blind_position = positions[0];
+                this.gameState.big_blind_position = positions[1];
+            }
+        }
+    }
+
+    // 获取小盲注位置
+    getSmallBlindPosition() {
+        const gs = this.gameState;
+        if (!gs || !Array.isArray(gs.players) || gs.players.length === 0) return 0;
+
+        // 1) 优先使用后端提供的小盲注位置
+        const provided = Number(gs.small_blind_position || 0);
+        if (provided) {
+            return provided;
+        }
+
+        // 2) 尝试从玩家数据中找到有小盲动作的玩家
+        const smallBlindPlayer = gs.players.find(p => p && p.last_action === 'sb');
+        if (smallBlindPlayer) {
+            return Number(smallBlindPlayer.position || 0);
+        }
+
+        // 3) 根据庄家位置计算小盲注位置（庄家的下一位）
+        let dealerPos = Number(this.gameState?.dealer_position || 0);
+        
+        // 如果后端没有提供庄家位置，尝试从玩家数据中推导
+        if (!dealerPos) {
+            dealerPos = this.computeDealerPositionForRender();
+        }
+        
+        if (dealerPos) {
+            const activePlayers = gs.players.filter(p => p && !p.is_folded);
+            const positions = activePlayers
+                .map(p => Number(p.position))
+                .filter(n => !isNaN(n))
+                .sort((a, b) => a - b);
+            
+            if (positions.length > 0) {
+                const dealerIndex = positions.indexOf(dealerPos);
+                if (dealerIndex !== -1) {
+                    // 小盲注是庄家的下一位（顺时针）
+                    const smallBlindPos = positions[(dealerIndex + 1) % positions.length] || 0;
+                    return smallBlindPos;
+                }
+            }
+        }
+
+        // 4) 从玩家下注额推断小盲位置
+        const activePlayers = gs.players.filter(p => p && !p.is_folded);
+        if (activePlayers.length >= 2) {
+            // 按下注额排序
+            const playersByBet = [...activePlayers].sort((a, b) => 
+                Number(a.current_bet || 0) - Number(b.current_bet || 0)
+            );
+            
+            // 如果有两个或更多玩家有下注，最小的下注是小盲
+            const playersWithBets = playersByBet.filter(p => Number(p.current_bet || 0) > 0);
+            
+            if (playersWithBets.length >= 1) {
+                const smallBlindPos = Number(playersWithBets[0].position || 0);
+                return smallBlindPos;
+            }
+        }
+
+        return 0;
+    }
+
+    // 获取大盲注位置
+    getBigBlindPosition() {
+        const gs = this.gameState;
+        if (!gs || !Array.isArray(gs.players) || gs.players.length === 0) return 0;
+
+        // 1) 优先使用后端提供的大盲注位置
+        const provided = Number(gs.big_blind_position || 0);
+        if (provided) {
+            return provided;
+        }
+
+        // 2) 尝试从玩家数据中找到有大盲动作的玩家
+        const bigBlindPlayer = gs.players.find(p => p && p.last_action === 'bb');
+        if (bigBlindPlayer) {
+            return Number(bigBlindPlayer.position || 0);
+        }
+
+        // 3) 根据小盲注位置计算大盲注位置（小盲注的下一位）
+        const smallBlindPos = this.getSmallBlindPosition();
+        if (smallBlindPos) {
+            const activePlayers = gs.players.filter(p => p && !p.is_folded);
+            const positions = activePlayers
+                .map(p => Number(p.position))
+                .filter(n => !isNaN(n))
+                .sort((a, b) => a - b);
+            
+            if (positions.length > 0) {
+                const sbIndex = positions.indexOf(smallBlindPos);
+                if (sbIndex !== -1) {
+                    // 大盲注是小盲注的下一位（顺时针）
+                    const bigBlindPos = positions[(sbIndex + 1) % positions.length] || 0;
+                    return bigBlindPos;
+                }
+            }
+        }
+
+        // 4) 从玩家下注额推断大盲位置
+        const activePlayers = gs.players.filter(p => p && !p.is_folded);
+        if (activePlayers.length >= 2) {
+            // 按下注额排序
+            const playersByBet = [...activePlayers].sort((a, b) => 
+                Number(a.current_bet || 0) - Number(b.current_bet || 0)
+            );
+            
+            // 如果有两个或更多玩家有下注，第二小的下注是大盲
+            const playersWithBets = playersByBet.filter(p => Number(p.current_bet || 0) > 0);
+            
+            if (playersWithBets.length >= 2) {
+                const bigBlindPos = Number(playersWithBets[1].position || 0);
+                return bigBlindPos;
+            } else if (playersWithBets.length === 1) {
+                // 只有一个玩家有下注，假设他是大盲
+                const bigBlindPos = Number(playersWithBets[0].position || 0);
+                return bigBlindPos;
+            }
+        }
+
         return 0;
     }
 
@@ -1872,7 +2578,8 @@ class PokerGame {
                 'showdown': '摊牌',
                 'ended': '结束'
             };
-            stageEl.textContent = stageNames[stage] || stage;
+            const stageText = stageNames[stage] || stage;
+            stageEl.textContent = stageText;
         }
     }
     

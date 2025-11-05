@@ -76,6 +76,10 @@ class Player:
         self.win = False
         # 重置操作记录
         self.last_action = ''
+        # 游戏开始时清除准备状态
+        self.is_ready = False
+        # 游戏开始时清除准备状态
+        self.is_ready = False
     
     def evaluate_hand(self, community_cards: List[Card]) -> Dict[str, Any]:
         """评估手牌强度"""

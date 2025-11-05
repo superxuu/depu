@@ -1269,7 +1269,24 @@ async def start_game_in_room(room_id: str):
         if game.start_game():
             update_room_status(room_id, "playing")
             
-            # 游戏开始后，为每个玩家单独发送包含手牌信息的游戏状态
+            # 获取完整的游戏状态（不包含手牌信息）
+            public_game_state = game.get_game_state()
+            
+            # 添加调试日志
+            print(f"Game started in room {room_id}, broadcasting game_started message")
+            print(f"Public game state: dealer_position={public_game_state.get('dealer_position')}")
+            print(f"Players in game: {[p.get('nickname') + ' (pos:' + str(p.get('position')) + ', action:' + str(p.get('last_action')) + ')' for p in public_game_state.get('players', [])]}")
+            
+            # 先广播公共游戏状态给所有在线玩家（显示庄家、大小盲等信息）
+            await manager.broadcast({
+                "type": "game_started",
+                "data": public_game_state
+            })
+            
+            # 重要：延迟发送个人游戏状态，确保 game_started 消息先被处理
+            await asyncio.sleep(0.1)
+            
+            # 然后为每个玩家单独发送包含手牌信息的游戏状态
             # 确保每个玩家只能看到自己的手牌
             for player in eligible_players:
                 game_state = game.get_game_state(player["user_id"])
