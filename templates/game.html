@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 
 {% block content %}
+<!-- 防止缓存：禁用缓存 -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+
 <script id="user-data" type="application/json">
     {{ user|tojson }}
 </script>
@@ -109,7 +114,7 @@
 </div>
 
 
-<script src="{{ url_for('static', path='js/game.js') }}?v=1.5"></script>
+<script src="{{ url_for('static', path='js/game.js') }}?v={{ timestamp }}"></script>
 <script>
     // 极简认证 - 只使用cookie（符合技术方案）
     const sessionToken = document.cookie.match(/session_token=([^;]+)/)?.[1];
@@ -127,6 +132,6 @@
 {% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/game.css') }}?v=1.4">
-<link rel="stylesheet" href="{{ url_for('static', path='css/mobile.css') }}?v=1.0">
+<link rel="stylesheet" href="{{ url_for('static', path='css/game.css') }}?v={{ timestamp }}">
+<link rel="stylesheet" href="{{ url_for('static', path='css/mobile.css') }}?v={{ timestamp }}">
 {% endblock %}

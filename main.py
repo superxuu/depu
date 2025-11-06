@@ -598,11 +598,16 @@ async def room_page(request: Request):
         )
         room = get_room_by_id(FIXED_ROOM_ID)
     
+    # 添加时间戳防止缓存
+    import time
+    timestamp = int(time.time())
+    
     return templates.TemplateResponse("game.html", {
         "request": request,
         "user": user,
         "room": room,
-        "settings": settings
+        "settings": settings,
+        "timestamp": timestamp
     })
 
 # WebSocket连接管理
