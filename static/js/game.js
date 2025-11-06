@@ -1547,22 +1547,27 @@ class PokerGame {
     }
 
     getPlayerActionText(player) {
+        if (!player) return '盲注';
+        
         // 优先级1：ALL-IN状态
-        if (player && player.is_all_in) {
+        if (player.is_all_in) {
             return 'ALL-IN';
         }
         // 优先级2：弃牌状态
-        else if (player && player.is_folded) {
+        if (player.is_folded) {
             return '弃牌';
         }
-        // 优先级3：last_action字段
-        else if (player && player.last_action) {
-            const actionMap = { 'check': '过牌', 'call': '跟注', 'raise': '加注', 'fold': '弃牌', 'sb': '小盲', 'bb': '大盲' };
-            return actionMap[player.last_action] || '下注';
-        }
-        // 优先级4：通过current_bet判断操作类型
-        else if (player && player.current_bet > 0) {
+        
+        // 优先级3：玩家有当前下注金额（包括跟注后）
+        if (player.current_bet > 0) {
             const gameState = this.gameState;
+            
+            // 首先检查last_action是否为raise（最准确的判断）
+            if (player.last_action === 'raise') {
+                return '加注';
+            }
+            
+            // 其次通过金额比较判断
             if (gameState && gameState.current_bet) {
                 if (player.current_bet === gameState.current_bet) {
                     return '跟注';
@@ -1570,9 +1575,26 @@ class PokerGame {
                     return '加注';
                 }
             }
+            // 如果无法判断具体操作类型，但玩家有下注，显示"下注"
+            return '下注';
         }
+        
+        // 优先级4：通过last_action判断操作类型
+        if (player.last_action) {
+            const actionMap = { 
+                'check': '过牌', 
+                'call': '跟注', 
+                'raise': '加注', 
+                'fold': '弃牌', 
+                'sb': '小盲', 
+                'bb': '大盲' 
+            };
+            return actionMap[player.last_action] || '下注';
+        }
+        
         // 优先级5：如果玩家没有下注但游戏正在进行，可能是过牌
-        else if (player && player.current_bet === 0 && this.gameState && this.gameState.stage && this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
+        if (this.gameState && this.gameState.stage && 
+            this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
             // 检查玩家是否已经行动过（通过acted_positions判断）
             const actedPositions = this.gameState.acted_positions || [];
             if (actedPositions.includes(player.position)) {
@@ -1580,15 +1602,36 @@ class PokerGame {
             }
         }
         
-        // 默认返回"下注"
-        return '下注';
+        // 优先级6：游戏开始时，大小盲玩家显示盲注
+        if (this.gameState && this.gameState.stage && 
+            this.gameState.stage === 'preflop') {
+            const smallBlindPos = this.getSmallBlindPosition();
+            const bigBlindPos = this.getBigBlindPosition();
+            const isSmallBlind = smallBlindPos && Number(smallBlindPos) === Number(player.position);
+            const isBigBlind = bigBlindPos && Number(bigBlindPos) === Number(player.position);
+            
+            if (isSmallBlind || isBigBlind) {
+                return '盲注';
+            }
+        }
+        
+        // 默认返回空字符串（不显示操作）
+        return '';
     }
 
     shouldShowAction(player) {
+        if (!player) return false;
+        
         // 如果玩家有last_action，需要显示操作
-        if (player && player.last_action) {
+        if (player.last_action) {
             return true;
         }
+        
+        // 如果玩家有当前下注金额，需要显示操作
+        if (player.current_bet > 0) {
+            return true;
+        }
+        
         // 如果玩家已经行动过（在acted_positions中），需要显示操作
         if (this.gameState && this.gameState.acted_positions) {
             const actedPositions = this.gameState.acted_positions || [];
@@ -1596,12 +1639,15 @@ class PokerGame {
                 return true;
             }
         }
+        
         // 如果游戏正在进行且玩家有操作需要显示
-        if (this.gameState && this.gameState.stage && this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
+        if (this.gameState && this.gameState.stage && 
+            this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
             // 检查玩家是否有需要显示的操作
             const actionText = this.getPlayerActionText(player);
-            return actionText !== '下注' && actionText !== '';
+            return actionText !== '';
         }
+        
         return false;
     }
 
@@ -1648,13 +1694,13 @@ class PokerGame {
         // ALL-IN玩家显示"ALL-IN"
         if (player.is_all_in) return '';
         
-        // 有下注金额的玩家显示金额
+        // 优先级1：有下注金额的玩家显示当前下注金额（包括跟注金额）
         if (player.current_bet > 0) {
             return ` ${player.current_bet}`;
         }
         
-        // 盲注玩家显示盲注金额
-        if (player.last_action === 'sb' || player.last_action === 'bb') {
+        // 优先级2：盲注玩家显示盲注金额（仅在没有实际下注时显示）
+        if ((player.last_action === 'sb' || player.last_action === 'bb') && player.current_bet === 0) {
             const gameState = this.gameState;
             if (gameState) {
                 if (player.last_action === 'sb' && gameState.small_blind) {
@@ -1665,19 +1711,23 @@ class PokerGame {
             }
         }
         
-        // 游戏开始时，大小盲玩家显示盲注金额（即使没有last_action或current_bet）
-        if (this.gameState && this.gameState.stage && this.gameState.stage !== 'waiting' && this.gameState.stage !== 'ended') {
+        // 优先级3：游戏开始时，大小盲玩家显示盲注金额（仅限预翻牌阶段且玩家未行动过）
+        if (this.gameState && this.gameState.stage && this.gameState.stage === 'preflop') {
             const smallBlindPos = this.getSmallBlindPosition();
             const bigBlindPos = this.getBigBlindPosition();
             const isSmallBlind = smallBlindPos && Number(smallBlindPos) === Number(player.position);
             const isBigBlind = bigBlindPos && Number(bigBlindPos) === Number(player.position);
             
-            if (isSmallBlind) {
-                // 小盲玩家显示小盲金额
+            // 检查玩家是否已经行动过
+            const actedPositions = this.gameState.acted_positions || [];
+            const hasActed = actedPositions.includes(player.position);
+            
+            if (isSmallBlind && !hasActed) {
+                // 小盲玩家显示小盲金额（仅在预翻牌阶段且未行动过）
                 const smallBlindAmount = this.gameState.small_blind || 5; // 默认5
                 return ` ${smallBlindAmount}`;
-            } else if (isBigBlind) {
-                // 大盲玩家显示大盲金额
+            } else if (isBigBlind && !hasActed) {
+                // 大盲玩家显示大盲金额（仅在预翻牌阶段且未行动过）
                 const bigBlindAmount = this.gameState.big_blind || 10; // 默认10
                 return ` ${bigBlindAmount}`;
             }
