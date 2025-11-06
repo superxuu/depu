@@ -233,6 +233,46 @@ class PokerGame {
         const currentBigBlind = this.gameState?.big_blind;
         const currentStage = this.gameState?.stage; // 保存stage信息
         
+        // 检查是否是从一轮结束进入下一轮的过渡（需要延迟）
+        const isStageTransition = this._checkStageTransition(gameState, currentStage);
+        
+        // 如果检测到阶段过渡，设置延迟
+        if (isStageTransition) {
+            if (this.stageTransitionTimeout) {
+                clearTimeout(this.stageTransitionTimeout);
+            }
+            
+            // 延迟0.5秒后再更新游戏状态
+            this.stageTransitionTimeout = setTimeout(() => {
+                this._processGameStateUpdate(gameState, currentSmallBlindPos, currentBigBlindPos, 
+                    currentDealerPos, currentSmallBlind, currentBigBlind, currentStage);
+            }, 500);
+            return;
+        }
+        
+        // 如果没有阶段过渡，立即更新游戏状态
+        this._processGameStateUpdate(gameState, currentSmallBlindPos, currentBigBlindPos, 
+            currentDealerPos, currentSmallBlind, currentBigBlind, currentStage);
+    }
+    
+    _checkStageTransition(gameState, currentStage) {
+        // 检查是否是从一轮结束进入下一轮的过渡
+        if (!this.gameState || !currentStage) return false;
+        
+        const newStage = this.normalizeStage(gameState.stage);
+        const oldStage = this.normalizeStage(currentStage);
+        
+        // 如果阶段发生变化，并且不是从等待/结束状态开始的，需要延迟
+        if (newStage && oldStage && newStage !== oldStage) {
+            const transitionStages = ['preflop', 'flop', 'turn', 'river', 'showdown'];
+            return transitionStages.includes(oldStage) && transitionStages.includes(newStage);
+        }
+        
+        return false;
+    }
+    
+    _processGameStateUpdate(gameState, currentSmallBlindPos, currentBigBlindPos, 
+                          currentDealerPos, currentSmallBlind, currentBigBlind, currentStage) {
         // 更新游戏状态
         this.gameState = gameState;
         
@@ -1290,15 +1330,15 @@ class PokerGame {
         const dealerPos = Number(this.gameState?.dealer_position || 0) || Number(this.dealerPositionForRender || 0);
         const isDealer = dealerPos && Number(dealerPos) === Number(player.position);
         const stage = this.normalizeStage(this.gameState?.stage || 'waiting');
-        // 游戏开始后（非等待阶段）一直显示庄家标识
-        const dealerBadge = (stage !== 'waiting' && isDealer) ? `<div class="dealer-badge" title="庄家">D</div>` : '';
+        // 游戏进行中阶段显示庄家标识，游戏结束后不显示（等待下一轮）
+        const dealerBadge = (stage !== 'waiting' && stage !== 'ended' && isDealer) ? `<div class="dealer-badge" title="庄家">D</div>` : '';
         
-        // 盲注标识（SB/BB）- 游戏开始后一直显示
+        // 盲注标识（SB/BB）- 游戏进行中阶段显示，游戏结束后不显示（等待下一轮）
         let smallBlindBadge = '';
         let bigBlindBadge = '';
         
-        // 游戏开始后（非等待阶段）一直显示盲注标识
-        if (stage !== 'waiting') {
+        // 游戏进行中阶段显示盲注标识，游戏结束后不显示
+        if (stage !== 'waiting' && stage !== 'ended') {
             // 小盲注标识
             const smallBlindPos = this.getSmallBlindPosition();
             const isSmallBlind = smallBlindPos && Number(smallBlindPos) === Number(player.position);
