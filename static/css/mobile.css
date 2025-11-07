@@ -38,7 +38,7 @@
     min-height: 0;
   }
 
-  /* 牌桌区域优化 - 往上挪一点 */
+  /* 牌桌区域优化 - 调整位置 */
   .main-table-section {
     flex: 1;
     display: flex !important;
@@ -51,7 +51,7 @@
     width: 100% !important;
     overflow: hidden;
     position: relative;
-    padding-top: 5vh !important;  /* 从顶部增加5%的距离 */
+    padding-top: 8vh !important;  /* 从顶部增加8%的距离，让牌桌往下挪动一点 */
   }
 
   /* 强制牌桌容器居中 */
@@ -100,7 +100,7 @@
     width: 100% !important;
     height: 100% !important;
     border-width: 6px;
-    border-radius: 50%;
+    border-radius: 40% !important; /* 调整为与PC端相似的椭圆形状，不是完全圆形 */
   }
 
   /* 玩家圆圈大小适配 */
@@ -559,6 +559,13 @@
   .poker-table-container {
     width: min(85vw, 280px) !important;
     height: min(54vw, 175px) !important;
+  }
+  
+  .poker-table {
+    width: 100% !important;
+    height: 100% !important;
+    border-width: 6px;
+    border-radius: 40% !important; /* 调整为与PC端相似的椭圆形状，不是完全圆形 */
   }
 
   .player-circle {
