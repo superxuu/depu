@@ -1,69 +1,824 @@
-/* 移动端（以牌桌为基准）适配样式 */
+/* 移动端适配样式 - 专注竖屏优化 */
 @media (max-width: 768px) {
-  /* 仅保留核心区域：牌桌+玩家+按钮+摊牌浮层 */
-  .header, .game-header { display: none !important; }
-  .footer { display: none !important; }
-  .chat-section { display: none !important; }
+  /* 基础布局优化 */
+  html, body {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    overflow-x: hidden;
+    touch-action: manipulation;
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
 
-  /* 容器与主内容压缩边距，以牌桌为中心 */
-  .container, .main-content { padding: 0 !important; margin: 0 !important; }
+  /* 隐藏非必要元素，聚焦核心游戏区域 */
+  .header, .game-header, .footer, .chat-section { 
+    display: none !important; 
+  }
+
+  /* 容器优化 */
   .game-container {
-    max-width: 100vw !important;
-    padding: 8px !important;
-    min-height: 100svh;
+    width: 100vw !important;
+    height: 100svh !important;
+    padding: 0 !important;
+    margin: 0 !important;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    position: relative;
+    overflow: hidden;
   }
 
-  /* 以牌桌模块为基准：居中显示 */
+  /* 主内容区域优化 */
+  .game-content {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* 牌桌区域优化 - 往上挪一点 */
   .main-table-section {
+    flex: 1;
+    display: flex !important;
+    flex-direction: column;
     align-items: center !important;
-    justify-content: flex-start !important;
-    margin: 0 auto !important;
-  }
-  #table-stage {
-    margin: 0 auto !important;
-    transform-origin: center top !important; /* 与现有JS缩放一致 */
+    justify-content: flex-start !important;  /* 改为从顶部开始，往上挪 */
+    min-height: 0;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    overflow: hidden;
+    position: relative;
+    padding-top: 5vh !important;  /* 从顶部增加5%的距离 */
   }
 
-  /* 按钮区域保持底部固定（如已在 game.css 定义，这里仅兜底） */
-  .game-action-section {
+  /* 强制牌桌容器居中 */
+  #table-stage {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
+  }
+
+  /* 牌桌容器强制居中 */
+  .poker-table-container {
+    width: min(90vw, 320px) !important;
+    height: min(56vw, 200px) !important;
+    max-width: 320px;
+    max-height: 200px;
+    margin: 0 auto !important;
+    position: relative !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    left: 0 !important;
+    transform: none !important;
+  }
+
+  /* 牌桌容器响应式缩放 */
+  .poker-table-container {
+    width: min(90vw, 320px) !important;
+    height: min(56vw, 200px) !important;
+    max-width: 320px;
+    max-height: 200px;
+    margin: 0 auto;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .poker-table {
+    width: 100% !important;
+    height: 100% !important;
+    border-width: 6px;
+    border-radius: 50%;
+  }
+
+  /* 玩家圆圈大小适配 */
+  .player-circle {
+    width: 64px !important;
+    height: 64px !important;
+    font-size: 8px !important;
+    border-width: 2px !important;
+    padding: 2px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    overflow: visible !important; /* 修改为visible，确保徽标可见 */
+    white-space: nowrap !important;
+  }
+  
+  /* 玩家操作信息圆圈 - 缩小字体和内边距 */
+  .player-bet-circle {
+    font-size: 8px !important;
+    padding: 1px 4px !important;
+    margin-top: 2px !important;
+  }
+  
+  /* 玩家状态圆圈 - 缩小字体和边距 */
+  .player-status-circle {
+    font-size: 8px !important;
+    margin-top: 1px !important;
+  }
+
+  .player-nickname {
+    font-size: 8px !important;
+    max-width: 100% !important;
+    line-height: 1.1 !important;
+    text-overflow: ellipsis !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-align: center !important;
+  }
+
+  .player-chips-circle {
+    font-size: 7px !important;
+    line-height: 1 !important;
+  }
+
+  /* 徽标大小适配 - 分别设置 */
+  .dealer-badge {
+    font-size: 9px !important;
+    width: 15px !important;
+    height: 15px !important;
+    line-height: 15px !important;
+  }
+  .small-blind-badge, .big-blind-badge {
+    font-size: 8px !important;
+    width: auto !important; /* 允许宽度自适应，确保背景完全包裹文字 */
+    height: auto !important; /* 允许高度自适应 */
+    min-height: 16px !important; /* 设置最小高度 */
+    line-height: 1.2 !important; /* 调整行高 */
+  }
+  
+  /* 庄家标识移动端定位 - 增加特异性 */
+  .player-circle .dealer-badge,
+  .players-around-table .player-circle .dealer-badge {
+    position: absolute !important;
+    top: -5px !important;
+    right: -5px !important;
+    background: #ffb300 !important;
+    color: #000 !important;
+    font-weight: bold !important;
+    text-align: center !important;
+    border-radius: 50% !important;
+    border: 2px solid #fff !important;
+    z-index: 100 !important; /* 提高z-index确保显示在最上层 */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+    display: block !important; /* 确保显示 */
+    line-height: 15px !important; /* 添加行高以确保文字垂直居中 */
+    font-size: 9px !important;
+    width: 15px !important;
+    height: 15px !important;
+  }
+  
+  /* 大小盲标识移动端定位 - 分别定义，增加特异性 */
+  .player-circle .small-blind-badge,
+  .players-around-table .player-circle .small-blind-badge {
+    position: absolute !important;
+    top: 100% !important; /* 放在玩家圆圈下面 */
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    background: rgba(255, 193, 7, 1) !important; /* 黄色背景 */
+    color: #000 !important; /* 小盲使用黑色文字与黄色底色形成对比 */
+    font-size: 8px !important;
+    font-weight: 600 !important; /* 增加字体粗细使文字更清晰 */
+    padding: 4px 8px !important; /* 增加内边距确保背景完全包裹文字 */
+    border-radius: 8px !important;
+    border: none !important; /* 移除边框 */
+    white-space: nowrap !important;
+    z-index: 100 !important; /* 提高z-index确保显示在最上层 */
+    margin-top: 2px !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    display: block !important; /* 确保显示 */
+    line-height: 1 !important; /* 设置行高为1，确保背景与文字完全对齐 */
+    height: auto !important; /* 允许高度自适应 */
+    box-sizing: border-box !important; /* 使用border-box确保内边距不会增加总尺寸 */
+  }
+  
+  .player-circle .big-blind-badge,
+  .players-around-table .player-circle .big-blind-badge {
+    position: absolute !important;
+    top: 100% !important; /* 放在玩家圆圈下面 */
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    background: rgba(255, 87, 34, 1) !important; /* 橙色背景 */
+    color: #fff !important; /* 大盲使用白色文字与橙色底色形成对比 */
+    font-size: 8px !important;
+    font-weight: 600 !important; /* 增加字体粗细使文字更清晰 */
+    padding: 4px 8px !important; /* 增加内边距确保背景完全包裹文字 */
+    border-radius: 8px !important;
+    border: none !important; /* 移除边框 */
+    white-space: nowrap !important;
+    z-index: 100 !important; /* 提高z-index确保显示在最上层 */
+    margin-top: 2px !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    display: block !important; /* 确保显示 */
+    line-height: 1 !important; /* 设置行高为1，确保背景与文字完全对齐 */
+    height: auto !important; /* 允许高度自适应 */
+    box-sizing: border-box !important; /* 使用border-box确保内边距不会增加总尺寸 */
+  }
+
+  /* 准备指示器移动端适配 - 确保显示完整 */
+  .ready-indicator {
+    position: absolute !important;
+    top: -8px !important;
+    right: -8px !important;
+    width: 24px !important;
+    height: 24px !important;
+    background: #4CAF50 !important;
+    color: white !important;
+    border-radius: 50% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 14px !important;
+    font-weight: bold !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+    z-index: 100 !important;
+    border: 1px solid rgba(255, 255, 255, 0.8) !important;
+  }
+
+  /* 公共牌和个人牌适配 - 调整为与摊牌区域一致的样式 */
+  .community-cards-center {
+    top: 40% !important; /* 向下移动公共牌位置 */
+  }
+  
+  .community-cards-center .card {
+    width: 28px !important; /* 与摊牌区域一致 */
+    height: 40px !important; /* 与摊牌区域一致 */
+    font-size: 12px !important; /* 与摊牌区域一致 */
+    border-radius: 4px !important; /* 与摊牌区域一致 */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25) !important; /* 与摊牌区域一致 */
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  
+  .community-cards-center .card .card-rank {
+    font-size: 1em !important; /* 重置为正常大小 */
+  }
+  
+  .community-cards-center .card .card-suit {
+    font-size: 1em !important; /* 重置为正常大小 */
+  }
+
+  .player-hole-cards .card {
+    width: 28px !important; /* 与摊牌区域一致 */
+    height: 40px !important; /* 与摊牌区域一致 */
+    font-size: 12px !important; /* 与摊牌区域一致 */
+    border-radius: 4px !important; /* 与摊牌区域一致 */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25) !important; /* 与摊牌区域一致 */
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  
+  .player-hole-cards .card .card-rank {
+    font-size: 1em !important; /* 重置为正常大小 */
+  }
+  
+  .player-hole-cards .card .card-suit {
+    font-size: 1em !important; /* 重置为正常大小 */
+  }
+  
+  /* 确保牌的样式与摊牌区域一致 */
+  .community-cards-center .card, .player-hole-cards .card {
+    background: #fff !important; /* 白色背景 */
+  }
+  
+  /* 确保牌的花色颜色与摊牌区域一致 */
+  .card[data-suit="hearts"], .card[data-suit="diamonds"] {
+    color: #d32f2f !important; /* 红色花色 */
+    border: 1px solid rgba(211,47,47,0.6) !important;
+  }
+  
+  .card[data-suit="clubs"], .card[data-suit="spades"] {
+    color: #000000 !important; /* 黑色花色 */
+    border: 1px solid rgba(0,0,0,0.2) !important;
+  }
+
+  /* 游戏控制区域优化 - 增加高度以容纳所有元素，避免滚动 */
+  .game-controls-section {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
     z-index: 1000;
-    padding: max(10px, env(safe-area-inset-bottom) + 6px) 12px 12px;
-    background: rgba(20, 20, 20, 0.65);
-    backdrop-filter: blur(10px);
+    padding: max(12px, env(safe-area-inset-bottom) + 6px) 16px 16px;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(15px);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    min-height: 230px; /* 增加最小高度，确保所有游戏操作元素都能完全显示 */
     display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    justify-content: center;
-    border-top: 1px solid rgba(255,255,255,0.12);
-  }
-  
-  /* 手机端文字提示在所有按钮下方 */
-  #min-increment-hint {
-    width: 100%;
-    text-align: right;
-    margin-top: 8px;
-    font-size: 14px;
-    order: 999; /* 确保文字在最后显示 */
-    flex-basis: 100%; /* 强制文字换行显示 */
+    flex-direction: column;
+    justify-content: flex-start; /* 从顶部开始排列 */
+    max-height: 45vh; /* 设置最大高度，避免占用过多屏幕空间 */
+    /* 移除overflow-y: auto，不需要滚动 */
   }
 
-  /* 摊牌浮层：已固定底部，这里确保覆盖 */
-  .showdown-overlay { z-index: 100000 !important; }
-  .showdown-dialog {
-    position: fixed !important;
-    bottom: env(safe-area-inset-bottom, 0px) !important;
+  /* 游戏状态信息 */
+  .game-status {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .game-status span {
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  /* 操作按钮布局 - 修复按钮大小和排列 */
+  .action-buttons {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    width: 100% !important;
+    max-width: 360px !important;
+    margin: 0 auto !important;
+    flex-direction: column !important;
+    position: relative !important;
+  }
+
+  /* 游戏操作按钮布局 - 垂直排列，增加高度 */
+  .game-action-section {
+    /* 移除强制显示，让JavaScript控制显示状态 */
+    flex-direction: column !important;
+    justify-content: flex-start !important; /* 从顶部开始排列 */
+    width: 100% !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 10 !important;
+    background: rgba(0, 0, 0, 0.85) !important;
+    /* 移除display: none !important，让JavaScript控制显示状态 */
+    padding: 10px;
+    align-items: center;
+    min-height: 180px !important; /* 增加最小高度，确保所有元素都能显示 */
+    overflow-y: auto; /* 允许滚动，以防内容过多 */
+  }
+  
+  /* 游戏按钮容器 - 水平排列 */
+  .game-buttons-container {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    margin-bottom: 10px !important;
+  }
+
+  /* 游戏操作按钮样式 - 减小flex值 */
+  .game-buttons-container .action-btn {
+    padding: 8px 10px !important;
+    font-size: 10px !important;
+    border-radius: 8px !important;
+    min-height: 38px !important;
+    min-width: 60px !important;
+    touch-action: manipulation;
+    font-weight: 600;
+    border: none;
+    transition: all 0.2s ease;
+    flex: 0 0 auto !important; /* 不自动伸缩，使用固定尺寸 */
+    max-width: 70px !important; /* 减小最大宽度 */
+  }
+
+  /* 准备按钮区域保持当前布局 */
+  .ready-section {
+    position: relative !important;
+    z-index: 5 !important;
+  }
+
+  .ready-section .action-btn {
+    padding: 8px 10px !important;
+    font-size: 10px !important;
+    border-radius: 8px !important;
+    min-height: 38px !important;
+    min-width: 60px !important;
+    touch-action: manipulation;
+    font-weight: 600;
+    border: none;
+    transition: all 0.2s ease;
+    flex: 1 !important;
+    max-width: 100px !important;
+  }
+
+  .action-btn:active {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+
+  /* 加注区域特殊处理 - 确保有足够空间，换行显示 */
+  .raise-section {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin-top: 10px !important;
+    width: 100% !important;
+    padding: 5px 0 !important;
+  }
+
+  #raise-amount {
+    width: 120px !important; /* 增加宽度，确保可读性 */
+    padding: 8px !important;
+    font-size: 12px !important; /* 防止iOS自动缩放 */
+    border-radius: 6px !important;
+    text-align: center !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: white !important;
+    min-height: 36px !important;
+    margin-bottom: 5px !important; /* 确保在换行时正确显示 */
+  }
+
+  #raise-btn {
+    min-width: 80px !important; /* 增加宽度 */
+    padding: 8px 10px !important;
+    font-size: 10px !important;
+    min-height: 36px !important;
+    flex: 0 0 auto !important;
+    margin-bottom: 5px !important; /* 确保在换行时正确显示 */
+  }
+
+  #min-increment-hint {
+    text-align: center;
+    font-size: 9px;
+    margin-top: 8px !important; /* 增加与上方元素的间距 */
+    margin-bottom: 5px !important; /* 增加与底部元素的间距 */
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.3;
+    width: 100% !important;
+    display: block !important; /* 确保显示为块级元素，占满一行 */
+  }
+
+  /* 准备按钮区域 */
+  .ready-section {
+    display: flex !important;
+    gap: 6px !important;
+    width: 100% !important;
+    max-width: 280px !important;
+    margin: 0 auto !important;
+    justify-content: center !important;
+  }
+
+  .ready-section .action-btn {
+    font-size: 12px !important;
+    padding: 8px 10px !important;
+    min-height: 36px !important;
+    min-width: 80px !important;
+    flex: 1 !important;
+    max-width: 120px !important;
+  }
+
+  /* 连接状态指示器 */
+  .connection-status {
+    top: 12px !important;
+    right: 12px !important;
+    padding: 6px 10px !important;
+    font-size: 11px !important;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 12px;
+  }
+
+  .status-indicator {
+    width: 8px !important;
+    height: 8px !important;
+  }
+
+  /* Toast 消息优化 */
+  .toast {
+    min-width: 180px !important;
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+    border-radius: 8px;
+  }
+
+  /* 公共牌容器位置调整 */
+  .community-cards-center {
+    top: 40% !important;
+  }
+
+  /* 个人牌容器位置调整 */
+  .player-hole-cards {
+    top: 65% !important;
+    padding: 8px 16px;
+    border-radius: 15px;
+  }
+
+  /* 玩家容器优化 */
+  #players-container {
+    z-index: 25 !important;
+  }
+
+  /* 防止滚动 */
+  html, body {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
+  
+  .game-container {
+    overscroll-behavior: none;
+  }
+  
+  .game-controls-section {
+    overscroll-behavior: contain;
+  }
+}
+
+/* 超小屏幕优化 */
+@media (max-width: 480px) {
+  .poker-table-container {
+    width: min(85vw, 280px) !important;
+    height: min(54vw, 175px) !important;
+  }
+
+  .player-circle {
+    width: 56px !important;
+    height: 56px !important;
+    font-size: 7px !important;
+    padding: 2px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    overflow: visible !important; /* 修改为visible，确保徽标可见 */
+    white-space: nowrap !important;
+  }
+  
+  /* 超小屏幕玩家操作信息圆圈 - 进一步缩小 */
+  .player-bet-circle {
+    font-size: 7px !important;
+    padding: 1px 3px !important;
+    margin-top: 1px !important;
+  }
+  
+  /* 超小屏幕玩家状态圆圈 - 进一步缩小 */
+  .player-status-circle {
+    font-size: 7px !important;
+    margin-top: 1px !important;
+  }
+
+  .player-nickname {
+    font-size: 7px !important;
+    max-width: 100% !important;
+    line-height: 1.1 !important;
+    text-overflow: ellipsis !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-align: center !important;
+  }
+
+  .player-chips-circle {
+    font-size: 6px !important;
+    line-height: 1 !important;
+  }
+
+  /* 游戏操作按钮在超小屏幕上保持横向排列 */
+  .game-action-section .action-buttons {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    width: 100% !important;
+    max-width: 300px !important;
+    margin: 0 auto !important;
+  }
+
+  .game-action-section .action-btn {
+    font-size: 10px !important;
+    padding: 8px 10px !important;
+    min-height: 38px !important;
+    min-width: 60px !important;
+    max-width: 80px !important;
+    flex: none !important;
+  }
+
+  /* 准备按钮区域 */
+  .ready-section {
+    display: flex !important;
+    gap: 5px !important;
+    width: 100% !important;
+    max-width: 300px !important;
+    margin: 0 auto !important;
+    justify-content: center !important;
+  }
+
+  .ready-section .action-btn {
+    font-size: 12px !important;
+    padding: 8px 6px !important;
+    min-height: 40px !important;
+    min-width: 55px !important;
+    max-width: 80px !important;
+    flex: 1 !important;
+  }
+
+  .raise-section {
+    grid-column: 1 / -1;
+    gap: 6px;
+  }
+
+  #raise-amount {
+    max-width: 100px;
+    font-size: 12px;
+    padding: 8px;
+  }
+
+  .game-status {
+    font-size: 10px;
+    gap: 6px;
+  }
+
+  .game-status span {
+    padding: 5px 8px;
+    font-size: 9px;
+  }
+
+  .ready-section {
+    max-width: 240px;
+    gap: 6px;
+  }
+
+  .ready-section .action-btn {
+    font-size: 9px !important;
+    padding: 8px 4px !important;
+  }
+
+  /* 超小屏幕准备指示器适配 */
+  .ready-indicator {
+    top: -7px !important;
+    right: -7px !important;
+    width: 21px !important;
+    height: 21px !important;
+    font-size: 12px !important;
+  }
+  
+  /* 超小屏幕Toast消息优化 */
+  .toast {
+    min-width: 160px !important;
+    padding: 6px 10px !important;
+    font-size: 11px !important;
+    border-radius: 6px;
+  }
+  
+  /* 超小屏幕徽标优化 - 增加选择器特异性和可见性 */
+  .player-circle .dealer-badge,
+  .players-around-table .player-circle .dealer-badge,
+  #players-container .player-circle .dealer-badge {
+    width: 12px !important;
+    height: 12px !important;
+    line-height: 12px !important;
+    font-size: 7px !important;
+    position: absolute !important;
+    top: -5px !important;
+    right: -5px !important;
+    background: #ffb300 !important;
+    color: #000 !important;
+    font-weight: bold !important;
+    text-align: center !important;
+    border-radius: 50% !important;
+    border: 2px solid #fff !important;
+    z-index: 100 !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+    display: block !important;
+  }
+  
+  .player-circle .small-blind-badge,
+  .players-around-table .player-circle .small-blind-badge,
+  #players-container .player-circle .small-blind-badge {
+    position: absolute !important;
+    top: 100% !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
-    margin: 0 !important;
-    z-index: 100001 !important;
+    background: rgba(255, 193, 7, 1) !important; /* 黄色背景 */
+    color: #000 !important; /* 小盲使用黑色文字与黄色底色形成对比 */
+    font-size: 7px !important;
+    font-weight: 600 !important; /* 增加字体粗细使文字更清晰 */
+    padding: 3px 6px !important; /* 增加内边距确保背景完全包裹文字 */
+    border-radius: 8px !important;
+    border: none !important; /* 移除边框 */
+    white-space: nowrap !important;
+    z-index: 100 !important;
+    margin-top: 2px !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    display: block !important;
+    line-height: 1 !important; /* 设置行高为1，确保背景与文字完全对齐 */
+    height: auto !important; /* 允许高度自适应 */
+    box-sizing: border-box !important; /* 使用border-box确保内边距不会增加总尺寸 */
+  }
+  
+  .player-circle .big-blind-badge,
+  .players-around-table .player-circle .big-blind-badge,
+  #players-container .player-circle .big-blind-badge {
+    position: absolute !important;
+    top: 100% !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    background: rgba(255, 87, 34, 1) !important; /* 橙色背景 */
+    color: #fff !important; /* 大盲使用白色文字与橙色底色形成对比 */
+    font-size: 7px !important;
+    font-weight: 600 !important; /* 增加字体粗细使文字更清晰 */
+    padding: 3px 6px !important; /* 增加内边距确保背景完全包裹文字 */
+    border-radius: 8px !important;
+    border: none !important; /* 移除边框 */
+    white-space: nowrap !important;
+    z-index: 100 !important;
+    margin-top: 2px !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    display: block !important;
+    line-height: 1 !important; /* 设置行高为1，确保背景与文字完全对齐 */
+    height: auto !important; /* 允许高度自适应 */
+    box-sizing: border-box !important; /* 使用border-box确保内边距不会增加总尺寸 */
+  }
+}
+
+/* 触摸交互优化 */
+@media (max-width: 768px) {
+  .action-btn {
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: transform 0.1s ease, background-color 0.2s ease;
+  }
+
+  .action-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* 防止双击缩放 */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 安全区域适配 */
+  @supports(padding: max(0px)) {
+    .game-controls-section {
+      padding-left: max(8px, env(safe-area-inset-left));
+      padding-right: max(8px, env(safe-area-inset-right));
+    }
+
+    .main-table-section {
+      padding-left: max(4px, env(safe-area-inset-left));
+      padding-right: max(4px, env(safe-area-inset-right));
+    }
+  }
+
+  /* 高性能动画优化 */
+  .player-circle {
+    will-change: transform;
+    transform: translateZ(0);
+  }
+
+  .card {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  /* 优化输入框防止缩放 */
+  input[type="text"], input[type="number"], textarea {
+    font-size: 16px !important;
+    max-height: 44px;
+  }
+  
+  /* 优化按钮焦点状态 */
+  .action-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
+  }
+  
+  /* 优化长按行为 */
+  .action-btn {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 }

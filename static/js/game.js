@@ -203,6 +203,8 @@ class PokerGame {
                     // 更新游戏状态
                     this.gameState = js.game_state;
                     
+
+                    
                     // 如果新状态中没有盲注位置信息，但之前有，则恢复之前的盲注位置
                     if (!this.gameState.small_blind_position && currentSmallBlindPos) {
                         this.gameState.small_blind_position = currentSmallBlindPos;
@@ -218,6 +220,9 @@ class PokerGame {
                     const stage = this.normalizeStage(this.gameState?.stage || 'waiting');
                     this.updateGameStage(stage);
                     this.renderPlayers();
+                    
+                    // 重要：根据游戏状态渲染UI，确保准备/游戏按钮正确显示
+                    this.renderGameState();
                 }
             }
         } catch (e) {
@@ -631,6 +636,9 @@ class PokerGame {
             gameActionSection.style.display = 'none';
         }
         
+        // 禁用所有游戏操作按钮，防止意外点击
+        this.disableActionButtons();
+        
         // 重置当前玩家的准备状态为未准备
         if (this.user) {
             this.updateReadyUI(false);
@@ -780,9 +788,11 @@ class PokerGame {
         const readySection = document.getElementById('ready-section');
         const gameActionSection = document.getElementById('game-action-section');
 
-        // 判定是否为观战者：当游戏有状态且本机用户不在本手牌 players 列表中
+        // 修正观战者判断逻辑：只有在游戏进行中且玩家不在玩家列表中才视为观战者
         const isSpectator = !!(this.gameState
             && Array.isArray(this.gameState.players)
+            && this.gameState.players.length > 0  // 必须有玩家数据
+            && !['waiting', 'ended'].includes(this.normalizeStage(this.gameState.stage))  // 游戏必须正在进行中
             && !this.gameState.players.some(p => p && p.user_id === this.user?.user_id));
 
         if (readySection && gameActionSection) {
@@ -954,8 +964,9 @@ class PokerGame {
         
         const stage = this.normalizeStage(this.gameState.stage);
         
-        // 只在非 waiting/ended 阶段显示操作区
-        // 如果游戏已经结束（ended阶段），保持准备按钮显示
+
+        
+        // 处理不同游戏阶段的UI状态
         if (stage === 'ended') {
             // 游戏结束阶段，确保准备按钮显示，游戏操作区域隐藏
             const readySection = document.getElementById('ready-section');
@@ -967,15 +978,33 @@ class PokerGame {
             if (gameActionSection) {
                 gameActionSection.style.display = 'none';
             }
+        } else if (stage === 'waiting') {
+            // 等待阶段，确保准备按钮显示，游戏操作区域隐藏
+            const readySection = document.getElementById('ready-section');
+            const gameActionSection = document.getElementById('game-action-section');
+            
+            if (readySection) {
+                readySection.style.display = 'flex';
+            }
+            if (gameActionSection) {
+                gameActionSection.style.display = 'none';
+            }
         } else {
-            const gameInProgress = stage && !['waiting'].includes(stage);
+            // 游戏进行中，显示操作按钮，隐藏准备按钮
+            const gameInProgress = stage && !['waiting', 'ended'].includes(stage);
+            console.log('renderGameState: gameInProgress:', gameInProgress, 'stage:', stage);
             this.toggleGameActions(gameInProgress);
         }
 
         this.renderCommunityCards();
         this.renderPlayers();
         this.renderPot();
-        this.renderActionButtons();
+        
+        // 只在游戏进行中渲染操作按钮
+        if (stage && !['waiting', 'ended'].includes(stage)) {
+            this.renderActionButtons();
+        }
+        
         this.updateGameStage(stage);
         // 摊牌阶段渲染明牌
         if (stage === 'showdown' || stage === 'ended') {
@@ -1216,6 +1245,48 @@ class PokerGame {
         if (!isCurrentPlayer || !currentPlayer || currentPlayer.is_folded) {
             this.disableActionButtons();
             return;
+        }
+        
+        // 确保游戏操作区域的结构正确
+        const gameActionSection = document.getElementById('game-action-section');
+        if (gameActionSection) {
+            // 创建游戏按钮容器（如果不存在）
+            let gameButtonsContainer = document.querySelector('.game-buttons-container');
+            if (!gameButtonsContainer) {
+                gameButtonsContainer = document.createElement('div');
+                gameButtonsContainer.className = 'game-buttons-container';
+                
+                // 找到所有需要重新排列的元素
+                const actionButtons = gameActionSection.querySelectorAll('button:not(#raise-btn)');
+                const raiseSection = document.querySelector('.raise-section');
+                const minIncrementHint = document.getElementById('min-increment-hint');
+                
+                // 将游戏按钮添加到新容器
+                actionButtons.forEach(btn => {
+                    gameButtonsContainer.appendChild(btn);
+                });
+                
+                // 将新容器插入到加注区域之前
+                if (raiseSection) {
+                    gameActionSection.insertBefore(gameButtonsContainer, raiseSection);
+                } else if (minIncrementHint) {
+                    gameActionSection.insertBefore(gameButtonsContainer, minIncrementHint);
+                } else {
+                    gameActionSection.appendChild(gameButtonsContainer);
+                }
+            }
+            
+            // 确保加注区域和提示可见
+            const raiseSection = document.querySelector('.raise-section');
+            const minIncrementHint = document.getElementById('min-increment-hint');
+            
+            if (raiseSection) {
+                raiseSection.style.display = 'flex';
+            }
+            
+            if (minIncrementHint) {
+                minIncrementHint.style.display = 'block';
+            }
         }
         
         this.enableActionButtons();
@@ -2775,6 +2846,50 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // 创建PokerGame实例
             window.pokerGame = new PokerGame(userData);
+            
+            // 确保游戏操作区域默认隐藏，只有在游戏开始时才显示
+            const gameActionSection = document.getElementById('game-action-section');
+            if (gameActionSection) {
+                gameActionSection.style.display = 'none';
+                
+                // 创建游戏按钮容器，确保按钮始终横向排列，并确保加注区域可见
+                let gameButtonsContainer = document.querySelector('.game-buttons-container');
+                if (!gameButtonsContainer) {
+                    gameButtonsContainer = document.createElement('div');
+                    gameButtonsContainer.className = 'game-buttons-container';
+                    
+                    // 找到所有需要重新排列的元素
+                    const actionButtons = gameActionSection.querySelectorAll('button:not(#raise-btn)');
+                    const raiseSection = document.querySelector('.raise-section');
+                    const minIncrementHint = document.getElementById('min-increment-hint');
+                    
+                    // 将游戏按钮添加到新容器
+                    actionButtons.forEach(btn => {
+                        gameButtonsContainer.appendChild(btn);
+                    });
+                    
+                    // 将新容器插入到加注区域之前
+                    if (raiseSection) {
+                        gameActionSection.insertBefore(gameButtonsContainer, raiseSection);
+                    } else if (minIncrementHint) {
+                        gameActionSection.insertBefore(gameButtonsContainer, minIncrementHint);
+                    } else {
+                        gameActionSection.appendChild(gameButtonsContainer);
+                    }
+                }
+                
+                // 确保加注区域和提示在初始化时就有正确的样式
+                const raiseSection = document.querySelector('.raise-section');
+                const minIncrementHint = document.getElementById('min-increment-hint');
+                
+                if (raiseSection) {
+                    raiseSection.style.display = 'flex';
+                }
+                
+                if (minIncrementHint) {
+                    minIncrementHint.style.display = 'block';
+                }
+            }
             
             // 手机端：牌桌按屏幕宽度自适配并居中
             initTableWidthResponsive();

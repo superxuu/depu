@@ -14,27 +14,51 @@
     color: white;
 }
 
-/* 移动端全屏优化 */
+/* 移动端全屏优化 - 由mobile.css处理 */
 @media (max-width: 768px) {
     .game-container {
         min-height: 100svh;
-        padding: 12px;
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
     }
-
-    /* 让牌桌容器自适配屏幕宽度并居中，保持纵横比与内部布局 */
+    
+    /* 移动端布局由mobile.css统一管理 */
     .main-table-section {
-        align-items: center;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100% !important;
     }
+    
+    /* 牌桌强制居中显示 */
+    #table-stage {
+        width: 100% !important;
+        height: 100% !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        left: 0 !important;
+        transform: none !important;
+    }
+    
+    /* 牌桌尺寸和布局在mobile.css中定义 */
     .poker-table-container {
-        width: min(800px, 100vw - 24px);
-        aspect-ratio: 8 / 5; /* 与桌面 800x500 一致的比例 */
-        height: auto;
+        width: min(90vw, 320px) !important;
+        height: min(56vw, 200px) !important;
+        margin: 0 auto !important;
+        left: 0 !important;
+        position: relative !important;
     }
+    
     .poker-table {
-        width: 87.5%;           /* 700 / 800 */
-        aspect-ratio: 2 / 1;    /* 与桌面 700x350 接近的比例 */
-        height: auto;
-        border-width: 10px;     /* 保持边框厚度 */
+        width: 100% !important;
+        height: 100% !important;
+        border-width: 6px !important;
     }
 }
 
@@ -192,10 +216,16 @@
 }
 
 /* 准备按钮区域 */
+.action-buttons {
+    position: relative;
+}
+
 .ready-section {
     display: flex;
     gap: 10px;
     margin-bottom: 15px;
+    position: relative;
+    z-index: 50;
 }
 
 .btn-success {
@@ -205,9 +235,29 @@
 
 /* 游戏操作按钮区域 */
 .game-action-section {
-    display: flex;
+    /* 移除display: none，让JavaScript控制显示状态 */
     flex-direction: column;
     gap: 15px;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    padding: 15px;
+    z-index: 100;
+    min-height: 220px; /* 增加最小高度，确保所有元素都能完全显示 */
+    /* 移除overflow-y: auto，不需要滚动 */
+}
+
+/* 游戏按钮容器 - 水平排列 */
+.game-buttons-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    margin-bottom: 10px;
 }
 
 /* 牌样式 */
@@ -246,12 +296,12 @@
 }
 
 .card .card-rank {
-    font-size: 1.5em;
+    font-size: 1.4em; /* 减小牌面值大小 */
     text-align: left;
 }
 
 .card .card-suit {
-    font-size: 2em;
+    font-size: 1.7em; /* 减小花色大小 */
     text-align: center;
 }
 
@@ -557,15 +607,20 @@
 
 .raise-section {
     display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
     gap: 10px;
     align-items: center;
+    justify-content: center;
+    margin-top: 10px;
 }
 
 #min-increment-hint {
     display: block;
-    text-align: right;
+    text-align: center; /* 改为居中显示，与移动端一致 */
     width: 100%;
-    margin-top: 5px;
+    margin-top: 8px; /* 增加与上方元素的间距 */
+    margin-bottom: 5px; /* 增加与底部元素的间距 */
     min-height: 20px;
 }
 
@@ -577,6 +632,11 @@
     color: #2d3436;
     font-size: 1em;
     width: 120px;
+    margin-bottom: 5px;
+}
+
+#raise-btn {
+    margin-bottom: 5px;
 }
 
 /* 聊天样式 */
@@ -872,6 +932,10 @@
     #table-stage {
         will-change: transform;
         transform: none !important; /* 明确禁止缩放，保持牌桌与玩家原始尺寸 */
+        width: 100% !important; /* 修复牌桌居中问题 */
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
     }
 }
 
@@ -920,15 +984,15 @@
 
     /* 按钮参与中心区域缩放与居中，不固定到底部 */
     .game-action-section {
-        position: fixed;
+        position: absolute;
         left: 0;
         right: 0;
-        bottom: 0;
+        bottom: 10px; /* 相对于父元素底部10px */
         z-index: 1000;
         padding: max(10px, env(safe-area-inset-bottom) + 6px) 12px 12px;
         background: rgba(20, 20, 20, 0.65);
         backdrop-filter: blur(10px);
-        display: flex;
+        display: none; /* 默认隐藏，由JavaScript控制 */
         flex-direction: column;
         gap: 8px;
         align-items: center;
