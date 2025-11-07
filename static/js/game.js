@@ -1421,9 +1421,8 @@ class PokerGame {
             bigBlindBadge = isBigBlind ? `<div class="big-blind-badge" title="大盲注">大盲</div>` : '';
         }
         
-        // 离线状态标识
-        const offlineBadge = !isConnected ? 
-            `<div class="offline-badge" title="离线">⚫</div>` : '';
+        // 离线状态标识已移除
+        const offlineBadge = '';
         
         // 准备状态指示器 - 游戏进行中时不显示准备状态
         const readyIndicator = (player.is_ready && (!this.gameState || !this.gameState.stage || this.gameState.stage === 'waiting' || this.gameState.stage === 'ended')) ? 
@@ -1519,9 +1518,8 @@ class PokerGame {
             bigBlindBadge = isBigBlind ? `<div class="big-blind-badge" title="大盲注">大盲</div>` : '';
         }
         
-        // 离线状态标识
-        const offlineBadge = !isConnected ? 
-            `<div class="offline-badge" title="离线">⚫</div>` : '';
+        // 离线状态标识已移除
+        const offlineBadge = '';
         
         // 准备状态指示器 - 游戏进行中时不显示准备状态
         const readyIndicator = (player.is_ready && (!this.gameState || !this.gameState.stage || this.gameState.stage === 'waiting' || this.gameState.stage === 'ended')) ? 
@@ -2161,8 +2159,9 @@ class PokerGame {
             container.style.padding = '8px 12px';
             container.style.borderRadius = '8px';
             container.style.zIndex = '9999';
-            container.style.maxWidth = '90%';
+            container.style.maxWidth = '95vw'; // 使用视口宽度单位，更灵活适应不同屏幕
             container.style.fontSize = '14px';
+            container.style.minWidth = '280px'; // 设置最小宽度，确保内容不会过度压缩
             container.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
             document.body.appendChild(container);
         }
@@ -2232,33 +2231,73 @@ class PokerGame {
         const list = document.createElement('div');
         list.style.display = 'flex';
         list.style.flexWrap = 'wrap';
-        list.style.gap = '8px';
+        list.style.gap = '0'; // 移除间距，使玩家项目紧密排列
+        list.style.justifyContent = 'flex-start'; // 确保从左到右排列
 
         (Array.isArray(state.showdown_reveal) ? state.showdown_reveal : []).forEach(p => {
             const item = document.createElement('div');
             item.style.background = 'rgba(255,255,255,0.1)';
             item.style.border = '1px solid rgba(255,255,255,0.2)';
             item.style.borderRadius = '6px';
-            item.style.padding = '6px 8px';
+            item.style.padding = '8px';
+            // 只在右侧和底部添加边框，形成网格效果，但不在所有玩家周围添加间距
+            item.style.marginRight = '1px';
+            item.style.marginBottom = '1px';
             item.style.display = 'flex';
+            item.style.flexDirection = 'column'; // 改为垂直排列：名字在上，牌在下
             item.style.alignItems = 'center';
-            item.style.gap = '6px';
+            
+            // 移动端优化：根据屏幕宽度调整样式
+            const isMobile = window.innerWidth <= 768;
+            if (isMobile) {
+                // 移动端使用更紧凑的布局
+                item.style.marginBottom = '0'; // 移除底部边距
+                item.style.flex = '1 1 auto'; // 允许根据可用空间自适应宽度
+                item.style.minWidth = '100px'; // 减小最小宽度，允许更多玩家在一行显示
+                item.style.maxWidth = 'none'; // 允许根据名称长度扩展
+            } else {
+                // PC端保持原有布局
+                item.style.marginBottom = '0'; // 移除底部边距
+                item.style.flex = '1 1 auto'; // 允许根据可用空间自适应宽度
+                item.style.minWidth = '80px'; // 减小最小宽度
+                item.style.maxWidth = 'none'; // 允许根据名称长度扩展
+            }
 
+            // 名字和座位信息容器 - 在上方
             const info = document.createElement('div');
             info.textContent = `${p.nickname}（座位${p.position}）`;
-            info.style.marginRight = '6px';
+            info.style.whiteSpace = 'nowrap'; // 防止换行
+            info.style.overflow = 'hidden';
+            info.style.textOverflow = 'ellipsis';
+            info.style.fontSize = '14px';
+            info.style.fontWeight = 'bold';
+            info.style.color = '#fff';
+            info.style.textAlign = 'center';
+            info.style.marginBottom = '6px'; // 与下方牌的间距
+            
+            // 移除固定宽度，让名称根据可用空间自适应
+            info.style.width = 'auto';
+            info.style.minWidth = '60px'; // 最小宽度，确保可读性
+            info.style.maxWidth = '120px'; // 最大宽度，防止过长
+            info.style.flex = '1'; // 允许根据容器宽度自适应
             item.appendChild(info);
 
+            // 牌容器 - 在下方
             const cardsWrap = document.createElement('div');
             cardsWrap.style.display = 'flex';
             cardsWrap.style.gap = '4px';
+            cardsWrap.style.justifyContent = 'center'; // 居中显示牌
+            
+            // 重新定义牌的尺寸变量
+            const cardWidth = 28;
+
             (p.hole_cards || []).forEach(card => {
                 const cardEl = document.createElement('div');
                 cardEl.className = 'card';
-                cardEl.style.width = '28px';
+                cardEl.style.width = `${cardWidth}px`;
                 cardEl.style.height = '40px';
                 cardEl.style.display = 'flex';
-                cardEl.style.flexDirection = 'column';
+                cardEl.style.flexDirection = 'column'; // 牌内元素上下排列
                 cardEl.style.alignItems = 'center';
                 cardEl.style.justifyContent = 'center';
                 cardEl.style.background = '#fff';
