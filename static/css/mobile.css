@@ -38,20 +38,23 @@
     min-height: 0;
   }
 
-  /* 牌桌区域优化 - 调整位置 */
+  /* 牌桌区域优化 - 调整位置，解决不同浏览器兼容性问题 */
   .main-table-section {
     flex: 1;
     display: flex !important;
     flex-direction: column;
     align-items: center !important;
-    justify-content: flex-start !important;  /* 改为从顶部开始，往上挪 */
+    justify-content: center !important;  /* 改为居中显示，避免被底部按钮遮挡 */
     min-height: 0;
     padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
     overflow: hidden;
     position: relative;
-    padding-top: 8vh !important;  /* 从顶部增加8%的距离，让牌桌往下挪动一点 */
+    /* 移除固定的padding-top，使用flex居中方案 */
+    padding-top: 60px !important;  /* 固定像素值，避免vh单位在不同浏览器中的差异 */
+    padding-bottom: 240px !important;  /* 留出底部按钮区域的空间 */
+    box-sizing: border-box !important;  /* 确保内边距计算正确 */
   }
 
   /* 强制牌桌容器居中 */
@@ -796,6 +799,8 @@
     .main-table-section {
       padding-left: max(4px, env(safe-area-inset-left));
       padding-right: max(4px, env(safe-area-inset-right));
+      /* 确保底部有足够空间避免被按钮遮挡 */
+      padding-bottom: max(240px, calc(240px + env(safe-area-inset-bottom)));
     }
   }
 
