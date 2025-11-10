@@ -1379,14 +1379,23 @@ class PokerGame {
         // 获取玩家连接状态 - 使用后端返回的 connected 字段
         const isConnected = player.connected === true;
         
+        // 使用deriveCurrentPlayerId()函数确定当前行动的玩家
+        const currentUserId = this.deriveCurrentPlayerId();
+        const isCurrentPlayer = currentUserId && player.user_id === currentUserId;
+        
         playerEl.className = `player-circle 
                             ${player.user_id === this.user.user_id ? 'current-player' : ''} 
                             ${player.is_folded ? 'folded' : ''} 
-                            ${player.is_current_turn ? 'current-turn' : ''}
+                            ${isCurrentPlayer ? 'current-turn' : ''}
                             ${player.is_all_in ? 'all-in' : ''}
                             ${player.is_ready ? 'ready' : ''}
                             ${player.win ? 'winner' : ''}
                             ${!isConnected ? 'offline' : ''}`;
+        
+        // 当前行动玩家会有绿色外环（通过CSS类实现）
+        if (isCurrentPlayer) {
+            // 绿色外环样式已在CSS中定义
+        }
         
         // 设置玩家在椭圆上的位置（百分比）
         playerEl.style.left = `${position.x}%`;
@@ -1484,15 +1493,30 @@ class PokerGame {
         // 获取玩家连接状态
         const isConnected = player.connected === true;
         
+        // 使用deriveCurrentPlayerId()函数确定当前行动的玩家
+        const currentUserId = this.deriveCurrentPlayerId();
+        const isCurrentPlayer = currentUserId && player.user_id === currentUserId;
+        
         // 更新CSS类
         playerEl.className = `player-circle 
                             ${player.user_id === this.user.user_id ? 'current-player' : ''} 
                             ${player.is_folded ? 'folded' : ''} 
-                            ${player.is_current_turn ? 'current-turn' : ''}
+                            ${isCurrentPlayer ? 'current-turn' : ''}
                             ${player.is_all_in ? 'all-in' : ''}
                             ${player.is_ready ? 'ready' : ''}
                             ${player.win ? 'winner' : ''}
                             ${!isConnected ? 'offline' : ''}`;
+        
+        // 当前行动玩家会有绿色外环（通过CSS类实现）
+        if (isCurrentPlayer) {
+            // 绿色外环样式已在CSS中定义
+        }
+        
+        // 调试输出：标记当前行动的玩家
+        if (player.is_current_turn) {
+            console.log('当前行动玩家:', player.nickname, player.position);
+            playerEl.style.border = '4px solid #ff0000 !important'; // 红色边框用于测试
+        }
         
         // 如果是当前玩家，更新个人牌显示
         if (player.user_id === this.user.user_id && player.hole_cards && player.hole_cards.length > 0) {

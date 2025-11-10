@@ -375,9 +375,23 @@
 }
 
 .player-circle.current-turn {
-    border-color: #00b894;
+    border: 4px solid #00ff00 !important; /* 亮绿色边框，更宽更显眼 */
+    box-shadow: 0 0 15px rgba(0, 255, 0, 0.7) !important; /* 绿色光晕效果 */
     background: rgba(0, 184, 148, 0.3);
-    animation: pulse 2s infinite;
+    animation: current-turn-pulse 2s infinite; /* 使用专门的动画 */
+}
+
+/* 当前行动玩家的脉冲动画 */
+@keyframes current-turn-pulse {
+    0% {
+        box-shadow: 0 0 15px rgba(0, 255, 0, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 25px rgba(0, 255, 0, 0.9);
+    }
+    100% {
+        box-shadow: 0 0 15px rgba(0, 255, 0, 0.7);
+    }
 }
 
 .player-circle.folded {

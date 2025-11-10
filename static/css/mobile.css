@@ -121,6 +121,14 @@
     white-space: nowrap !important;
   }
   
+  /* 移动端当前行动玩家的样式 */
+  .player-circle.current-turn {
+    border: 3px solid #00ff00 !important; /* 亮绿色边框，适合移动端的宽度 */
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.7) !important; /* 绿色光晕效果，适合移动端 */
+    background: rgba(0, 184, 148, 0.3) !important;
+    animation: current-turn-pulse 2s infinite; /* 使用专门的动画 */
+  }
+  
   /* 玩家操作信息圆圈 - 缩小字体和内边距 */
   .player-bet-circle {
     font-size: 8px !important;
@@ -582,6 +590,14 @@
     align-items: center !important;
     overflow: visible !important; /* 修改为visible，确保徽标可见 */
     white-space: nowrap !important;
+  }
+  
+  /* 超小屏幕当前行动玩家的样式 */
+  .player-circle.current-turn {
+    border: 3px solid #00ff00 !important; /* 亮绿色边框，适合超小屏幕的宽度 */
+    box-shadow: 0 0 8px rgba(0, 255, 0, 0.7) !important; /* 绿色光晕效果，适合超小屏幕 */
+    background: rgba(0, 184, 148, 0.3) !important;
+    animation: current-turn-pulse 2s infinite; /* 使用专门的动画 */
   }
   
   /* 超小屏幕玩家操作信息圆圈 - 进一步缩小 */
