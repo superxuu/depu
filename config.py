@@ -28,7 +28,7 @@ class Settings:
     
     # 服务器配置
     HOST = "0.0.0.0"
-    PORT = 8058
+    PORT = int(os.getenv("PORT", 8058))  # Render环境使用$PORT变量
 
 # 全局配置实例
 settings = Settings()

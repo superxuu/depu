@@ -18,9 +18,15 @@ class PokerGame {
     
     initializeSocket() {
         try {
-            this.socket = new WebSocket(`ws://${window.location.host}/ws/game`);
+            // 动态判断协议，生产环境使用wss://，开发环境使用ws://
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/game`;
+            
+            console.log('正在连接WebSocket:', wsUrl);
+            this.socket = new WebSocket(wsUrl);
             
             this.socket.onopen = () => {
+                console.log('WebSocket连接成功');
                 this.isConnected = true;
                 this.hideConnectionMessages();
                 try { this.showToast('WS已连接', 'info'); } catch (e) { }
@@ -164,6 +170,8 @@ class PokerGame {
     }
     
     async handleAuthSuccess(data) {
+        console.log('认证成功，处理玩家数据:', data);
+        
         // 清除认证超时
         if (this.authTimeout) {
             clearTimeout(this.authTimeout);
@@ -174,6 +182,7 @@ class PokerGame {
         this.reconnectAttempts = 0;
         
         this.isConnected = true;
+        this.isAuthenticated = true; // 添加认证状态标志
         this.hideConnectionMessages();
         
         // 隐藏重连按钮
@@ -1211,8 +1220,19 @@ class PokerGame {
     }
     
     async updateRoomPlayers() {
-        // 直接调用renderPlayers，因为它现在总是从API获取最新数据
-        await this.renderPlayers();
+        console.log('更新玩家列表...');
+        try {
+            // 确保认证成功后再更新玩家列表
+            if (!this.isAuthenticated) {
+                console.log('未认证，跳过玩家列表更新');
+                return;
+            }
+            
+            // 直接调用renderPlayers，但它会优先使用WebSocket消息数据
+            await this.renderPlayers();
+        } catch (error) {
+            console.error('更新玩家列表失败:', error);
+        }
     }
     
     async updateRoomPlayersForce() {
