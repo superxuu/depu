@@ -58,6 +58,22 @@ if is_render_env and database_url:
                 )
                 ''')
                 
+                # 房间玩家关联表
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS room_players (
+                    id SERIAL PRIMARY KEY,
+                    room_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    nickname TEXT NOT NULL,
+                    chips INTEGER DEFAULT 1000,
+                    position INTEGER DEFAULT 0,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    is_ready BOOLEAN DEFAULT FALSE,
+                    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(room_id, user_id)
+                )
+                ''')
+                
                 conn.commit()
                 cursor.close()
                 conn.close()
@@ -100,6 +116,22 @@ if is_render_env and database_url:
                 min_bet INTEGER DEFAULT 5,
                 status TEXT DEFAULT 'waiting',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            ''')
+            
+            # 房间玩家关联表
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS room_players (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                nickname TEXT NOT NULL,
+                chips INTEGER DEFAULT 1000,
+                position INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                is_ready BOOLEAN DEFAULT FALSE,
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(room_id, user_id)
             )
             ''')
             
@@ -193,6 +225,22 @@ else:
                 min_bet INTEGER DEFAULT 5,
                 status TEXT DEFAULT 'waiting',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            ''')
+            
+            # 房间玩家关联表
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS room_players (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                nickname TEXT NOT NULL,
+                chips INTEGER DEFAULT 1000,
+                position INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                is_ready BOOLEAN DEFAULT FALSE,
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(room_id, user_id)
             )
             ''')
             
