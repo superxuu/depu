@@ -6,14 +6,18 @@ from datetime import datetime
 # 检查是否为Render环境
 is_render_env = os.environ.get('RENDER')
 
-if is_render_env:
+# 检查是否配置了PostgreSQL数据库
+database_url = os.environ.get('DATABASE_URL')
+
+# 优先使用PostgreSQL，如果不可用则使用SQLite
+if is_render_env and database_url:
     # Render环境使用PostgreSQL（使用psycopg替代psycopg2）
     import psycopg
     from psycopg.rows import dict_row
     
     class Database:
         def __init__(self):
-            self.database_url = os.environ.get('DATABASE_URL')
+            self.database_url = database_url
             self.init_database()
         
         def get_connection(self):
@@ -23,7 +27,53 @@ if is_render_env:
         
         def init_database(self):
             """初始化数据库表"""
-            conn = self.get_connection()
+            try:
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                
+                # 用户表
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    nickname TEXT UNIQUE NOT NULL,
+                    invite_code TEXT NOT NULL,
+                    chips INTEGER DEFAULT 1000,
+                    session_token TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_login TIMESTAMP
+                )
+                ''')
+                
+                # 房间表
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS rooms (
+                    room_id TEXT PRIMARY KEY,
+                    room_name TEXT NOT NULL,
+                    creator_id TEXT NOT NULL,
+                    max_players INTEGER DEFAULT 6,
+                    min_bet INTEGER DEFAULT 5,
+                    status TEXT DEFAULT 'waiting',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                ''')
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                print("PostgreSQL数据库初始化成功")
+            except Exception as e:
+                print(f"PostgreSQL初始化失败: {e}")
+                # 如果PostgreSQL失败，回退到SQLite
+                import sqlite3
+                self._use_sqlite = True
+                self.db_path = "poker_game.db"
+                self._init_sqlite()
+        
+        def _init_sqlite(self):
+            """初始化SQLite数据库"""
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
             # 用户表
@@ -54,30 +104,53 @@ if is_render_env:
             ''')
             
             conn.commit()
-            cursor.close()
             conn.close()
+            print("SQLite数据库初始化成功")
         
         def execute_query(self, query: str, params: tuple = ()):
             """执行查询并返回结果"""
-            conn = self.get_connection()
-            cursor = conn.cursor(row_factory=dict_row)
-            cursor.execute(query, params)
-            result = cursor.fetchall()
-            conn.commit()
-            cursor.close()
-            conn.close()
-            return result
+            if hasattr(self, '_use_sqlite') and self._use_sqlite:
+                # 使用SQLite
+                import sqlite3
+                conn = sqlite3.connect(self.db_path)
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                result = [dict(row) for row in cursor.fetchall()]
+                conn.close()
+                return result
+            else:
+                # 使用PostgreSQL
+                conn = self.get_connection()
+                cursor = conn.cursor(row_factory=dict_row)
+                cursor.execute(query, params)
+                result = cursor.fetchall()
+                conn.commit()
+                cursor.close()
+                conn.close()
+                return result
         
         def execute_update(self, query: str, params: tuple = ()):
             """执行更新操作"""
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            conn.commit()
-            cursor.close()
-            conn.close()
+            if hasattr(self, '_use_sqlite') and self._use_sqlite:
+                # 使用SQLite
+                import sqlite3
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                conn.commit()
+                conn.close()
+            else:
+                # 使用PostgreSQL
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                conn.commit()
+                cursor.close()
+                conn.close()
+
 else:
-    # 本地环境使用SQLite
+    # 本地环境或Render没有PostgreSQL时使用SQLite
     import sqlite3
     
     class Database:
@@ -125,6 +198,7 @@ else:
             
             conn.commit()
             conn.close()
+            print("SQLite数据库初始化成功")
         
         def execute_query(self, query: str, params: tuple = ()):
             """执行查询并返回结果"""
@@ -147,11 +221,7 @@ else:
 db = Database()
 
 # 数据库操作函数（兼容两种数据库语法）
-import os
-
-# 检查环境并设置占位符
-is_render_env = os.environ.get('RENDER')
-placeholder = "%s" if is_render_env else "?"
+placeholder = "%s" if (is_render_env and database_url) else "?"
 
 def get_user_by_session_token(session_token: str) -> Optional[Dict[str, Any]]:
     """根据session_token获取用户"""
