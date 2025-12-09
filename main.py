@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from database_render import db, get_user_by_session_token, get_user_by_nickname, create_user, update_user_session_token, create_room, create_fixed_room, get_all_rooms, get_room_by_id, update_room_status
+from database_render import db, placeholder, get_user_by_session_token, get_user_by_nickname, create_user, update_user_session_token, create_room, create_fixed_room, get_all_rooms, get_room_by_id, update_room_status
 from game_logic.game_engine import TexasHoldemGame, GameStage
 
 # WebSocket连接管理器
@@ -163,13 +163,13 @@ async def periodic_cleanup_loop():
                     
                     # 先查昵称，再删除
                     row = db.execute_query(
-                        "SELECT nickname FROM room_players WHERE room_id = ? AND user_id = ?",
+                        f"SELECT nickname FROM room_players WHERE room_id = {placeholder} AND user_id = {placeholder}",
                         (FIXED_ROOM_ID, user_id)
                     )
                     nickname = (row[0]["nickname"] if row and "nickname" in row[0] else None) or user_id
                     
                     db.execute_update(
-                        "DELETE FROM room_players WHERE room_id = ? AND user_id = ?",
+                        f"DELETE FROM room_players WHERE room_id = {placeholder} AND user_id = {placeholder}",
                         (FIXED_ROOM_ID, user_id)
                     )
                     
@@ -274,7 +274,7 @@ async def create_user_endpoint(request: Request):
     
     # 将用户添加到固定房间
     db.execute_update(
-        "INSERT OR REPLACE INTO room_players (room_id, user_id, nickname, chips) VALUES (?, ?, ?, ?)",
+        f"INSERT OR REPLACE INTO room_players (room_id, user_id, nickname, chips) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})",
         (FIXED_ROOM_ID, user["user_id"], user["nickname"], user["chips"])
     )
     
@@ -359,7 +359,7 @@ async def get_room_status():
     
     # 从数据库获取房间中的玩家信息
     players = db.execute_query(
-        "SELECT user_id, nickname, chips FROM room_players WHERE room_id = ?",
+        f"SELECT user_id, nickname, chips FROM room_players WHERE room_id = {placeholder}",
         (FIXED_ROOM_ID,)
     )
     
@@ -397,7 +397,7 @@ async def get_players(request: Request):
     
     # 从数据库获取固定房间的玩家信息（包含准备状态）
     players = db.execute_query(
-        "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
+        f"SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = {placeholder}",
         (FIXED_ROOM_ID,)
     )
     
@@ -446,12 +446,12 @@ async def cleanup_stale_connections():
             manager.disconnect(user_id)
             # 先查昵称，再删除
             row = db.execute_query(
-                "SELECT nickname FROM room_players WHERE room_id = ? AND user_id = ?",
+                f"SELECT nickname FROM room_players WHERE room_id = {placeholder} AND user_id = {placeholder}",
                 (room_id, user_id)
             )
             nickname = (row[0]["nickname"] if row and "nickname" in row[0] else None) or user_id
             db.execute_update(
-                "DELETE FROM room_players WHERE room_id = ? AND user_id = ?",
+                f"DELETE FROM room_players WHERE room_id = {placeholder} AND user_id = {placeholder}",
                 (room_id, user_id)
             )
             await manager.broadcast({
@@ -506,17 +506,17 @@ async def reset_chips(request: Request):
     if scope == "all":
         # 仅重置当前房间所有玩家
         players = db.execute_query(
-            "SELECT user_id, nickname FROM room_players WHERE room_id = ?",
+            f"SELECT user_id, nickname FROM room_players WHERE room_id = {placeholder}",
             (FIXED_ROOM_ID,)
         )
         for p in players:
             uid = p["user_id"]
             db.execute_update(
-                "UPDATE room_players SET chips = ? WHERE room_id = ? AND user_id = ?",
+                f"UPDATE room_players SET chips = {placeholder} WHERE room_id = {placeholder} AND user_id = {placeholder}",
                 (default_chips, FIXED_ROOM_ID, uid)
             )
             db.execute_update(
-                "UPDATE users SET chips = ? WHERE user_id = ?",
+                f"UPDATE users SET chips = {placeholder} WHERE user_id = {placeholder}",
                 (default_chips, uid)
             )
         affected = players
@@ -529,7 +529,7 @@ async def reset_chips(request: Request):
         q_marks = ",".join("?" for _ in user_ids)
         params = [FIXED_ROOM_ID] + user_ids
         rows = db.execute_query(
-            f"SELECT user_id, nickname FROM room_players WHERE room_id = ? AND user_id IN ({q_marks})",
+            f"SELECT user_id, nickname FROM room_players WHERE room_id = {placeholder} AND user_id IN ({q_marks})",
             tuple(params)
         )
         if not rows:
@@ -537,11 +537,11 @@ async def reset_chips(request: Request):
         for p in rows:
             uid = p["user_id"]
             db.execute_update(
-                "UPDATE room_players SET chips = ? WHERE room_id = ? AND user_id = ?",
+                f"UPDATE room_players SET chips = {placeholder} WHERE room_id = {placeholder} AND user_id = {placeholder}",
                 (default_chips, FIXED_ROOM_ID, uid)
             )
             db.execute_update(
-                "UPDATE users SET chips = ? WHERE user_id = ?",
+                f"UPDATE users SET chips = {placeholder} WHERE user_id = {placeholder}",
                 (default_chips, uid)
             )
         affected = rows
@@ -669,7 +669,7 @@ async def websocket_game_endpoint(websocket: WebSocket):
         
         # 获取当前房间的所有玩家
         players = db.execute_query(
-            "SELECT user_id, nickname, chips FROM room_players WHERE room_id = ?",
+            f"SELECT user_id, nickname, chips FROM room_players WHERE room_id = {placeholder}",
             (room_id,)
         )
         
@@ -682,7 +682,7 @@ async def websocket_game_endpoint(websocket: WebSocket):
         
         # 先获取最新的玩家状态
         players = db.execute_query(
-            "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
+            f"SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = {placeholder}",
             (room_id,)
         )
         
@@ -813,14 +813,14 @@ async def websocket_game_endpoint(websocket: WebSocket):
             
             # 在删除前查询昵称
             row = db.execute_query(
-                "SELECT nickname FROM room_players WHERE room_id = ? AND user_id = ?",
+                f"SELECT nickname FROM room_players WHERE room_id = {placeholder} AND user_id = {placeholder}",
                 (FIXED_ROOM_ID, user_id)
             )
             nickname = (row[0]["nickname"] if row and "nickname" in row[0] else None) or user_id
 
             # 从数据库中移除玩家
             db.execute_update(
-                "DELETE FROM room_players WHERE room_id = ? AND user_id = ?",
+                f"DELETE FROM room_players WHERE room_id = {placeholder} AND user_id = {placeholder}",
                 (FIXED_ROOM_ID, user_id)
             )
             
@@ -877,7 +877,7 @@ async def websocket_game_endpoint(websocket: WebSocket):
 
             # 先获取最新的玩家状态
             players = db.execute_query(
-                "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
+                f"SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = {placeholder}",
                 (FIXED_ROOM_ID,)
             )
             
@@ -907,7 +907,7 @@ async def websocket_game_endpoint(websocket: WebSocket):
             
             # 检查房间是否还有玩家
             remaining_players = db.execute_query(
-                "SELECT COUNT(*) as count FROM room_players WHERE room_id = ?",
+                f"SELECT COUNT(*) as count FROM room_players WHERE room_id = {placeholder}",
                 (FIXED_ROOM_ID,)
             )
             
@@ -942,7 +942,7 @@ async def update_all_players_status(room_id: str):
     """更新所有玩家的状态显示"""
     # 获取最新的玩家列表和状态
     players = db.execute_query(
-        "SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = ?",
+        f"SELECT user_id, nickname, chips, is_ready FROM room_players WHERE room_id = {placeholder}",
         (room_id,)
     )
     
@@ -970,7 +970,7 @@ async def handle_player_ready(user: Dict[str, Any], data: Dict[str, Any], room_i
     
     # 更新数据库中的准备状态
     db.execute_update(
-        "UPDATE room_players SET is_ready = ? WHERE room_id = ? AND user_id = ?",
+        f"UPDATE room_players SET is_ready = {placeholder} WHERE room_id = {placeholder} AND user_id = {placeholder}",
         (is_ready, room_id, user["user_id"])
     )
     
@@ -1094,12 +1094,12 @@ async def handle_game_end(room_id: str, game: TexasHoldemGame):
     for player in game.player_manager.players:
         # 更新房间玩家筹码
         db.execute_update(
-            "UPDATE room_players SET chips = ? WHERE room_id = ? AND user_id = ?",
+            f"UPDATE room_players SET chips = {placeholder} WHERE room_id = {placeholder} AND user_id = {placeholder}",
             (player.chips, room_id, player.user_id)
         )
         # 更新用户总筹码
         db.execute_update(
-            "UPDATE users SET chips = ? WHERE user_id = ?",
+            f"UPDATE users SET chips = {placeholder} WHERE user_id = {placeholder}",
             (player.chips, player.user_id)
         )
     
