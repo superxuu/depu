@@ -1,8 +1,0 @@
----
-description: 
-globs:
-alwaysApply: true
----
-# my-rule
-
-项目所有开发都基于TECHNICAL_DOCUMENT.md这个技术方案
