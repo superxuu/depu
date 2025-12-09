@@ -235,7 +235,7 @@ def get_user_by_nickname(nickname: str) -> Optional[Dict[str, Any]]:
     result = db.execute_query(query, (nickname,))
     return result[0] if result else None
 
-def create_user(nickname: str, invite_code: str) -> Dict[str, Any]:
+def create_user(nickname: str, invite_code: str, chips: int = 1000) -> Dict[str, Any]:
     """创建新用户"""
     import uuid
     user_id = str(uuid.uuid4())
@@ -243,16 +243,16 @@ def create_user(nickname: str, invite_code: str) -> Dict[str, Any]:
     
     query = f"""
     INSERT INTO users (user_id, nickname, invite_code, session_token, chips)
-    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, 1000)
+    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
     """
-    db.execute_update(query, (user_id, nickname, invite_code, session_token))
+    db.execute_update(query, (user_id, nickname, invite_code, session_token, chips))
     
     return {
         "user_id": user_id,
         "nickname": nickname,
         "invite_code": invite_code,
         "session_token": session_token,
-        "chips": 1000
+        "chips": chips
     }
 
 def update_user_session_token(user_id: str, session_token: str):
