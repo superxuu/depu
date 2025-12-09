@@ -328,9 +328,13 @@ def create_room(room_name: str, creator_id: str, max_players: int = 6, min_bet: 
         "status": "waiting"
     }
 
-def create_fixed_room():
-    """创建固定房间"""
-    return create_room("快速游戏", "system", 6, 5)
+def create_fixed_room(room_id: str, room_name: str, creator_id: str, max_players: int = 6, min_bet: int = 10) -> Dict[str, Any]:
+    """创建固定ID的房间"""
+    db.execute_update(
+        "INSERT INTO rooms (room_id, room_name, creator_id, max_players, min_bet) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (room_id) DO UPDATE SET room_name = %s, max_players = %s, min_bet = %s",
+        (room_id, room_name, creator_id, max_players, min_bet, room_name, max_players, min_bet)
+    )
+    return get_room_by_id(room_id)
 
 def get_all_rooms() -> List[Dict[str, Any]]:
     """获取所有房间"""
