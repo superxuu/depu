@@ -330,9 +330,8 @@ def create_room(room_name: str, creator_id: str, max_players: int = 6, min_bet: 
 
 def create_fixed_room(room_id: str, room_name: str, creator_id: str, max_players: int = 6, min_bet: int = 10) -> Dict[str, Any]:
     """创建固定ID的房间"""
-    # 使用SQLite兼容的语法
     db.execute_update(
-        "INSERT OR REPLACE INTO rooms (room_id, room_name, creator_id, max_players, min_bet) VALUES (?, ?, ?, ?, ?)",
+        f"INSERT OR REPLACE INTO rooms (room_id, room_name, creator_id, max_players, min_bet) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
         (room_id, room_name, creator_id, max_players, min_bet)
     )
     return get_room_by_id(room_id)
