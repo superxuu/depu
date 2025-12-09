@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from database import db, get_user_by_session_token, get_user_by_nickname, create_user, update_user_session_token, create_room, create_fixed_room, get_all_rooms, get_room_by_id, update_room_status
+from database_render import db, get_user_by_session_token, get_user_by_nickname, create_user, update_user_session_token, create_room, create_fixed_room, get_all_rooms, get_room_by_id, update_room_status
 from game_logic.game_engine import TexasHoldemGame, GameStage
 
 # WebSocket连接管理器

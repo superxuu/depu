@@ -138,3 +138,55 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Project-specific ignores
+# Database files
+poker_game.db
+*.db
+*.db-journal
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Node.js (if added in future)
+node_modules/
+npm-debug.log*
+
+# Build directories
+dist/
+build/
+
+# Configuration files (should be tracked if needed)
+# project.private.config.json  # Uncomment if this should be ignored
+
+# Fly.io deployment files (to be removed)
+.fly/
+fly.toml
+Dockerfile
+deploy_fly.sh
+
+# Render deployment files (render.yaml需要被跟踪，但其他文件可以忽略)
+
+# Local development only
+database_fly.py
