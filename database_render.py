@@ -7,9 +7,9 @@ from datetime import datetime
 is_render_env = os.environ.get('RENDER')
 
 if is_render_env:
-    # Render环境使用PostgreSQL
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
+    # Render环境使用PostgreSQL（使用psycopg替代psycopg2）
+    import psycopg
+    from psycopg.rows import dict_row
     
     class Database:
         def __init__(self):
@@ -18,7 +18,7 @@ if is_render_env:
         
         def get_connection(self):
             """获取数据库连接"""
-            conn = psycopg2.connect(self.database_url)
+            conn = psycopg.connect(self.database_url)
             return conn
         
         def init_database(self):
@@ -60,7 +60,7 @@ if is_render_env:
         def execute_query(self, query: str, params: tuple = ()):
             """执行查询并返回结果"""
             conn = self.get_connection()
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor = conn.cursor(row_factory=dict_row)
             cursor.execute(query, params)
             result = cursor.fetchall()
             conn.commit()
@@ -146,16 +146,22 @@ else:
 # 创建全局数据库实例
 db = Database()
 
-# 数据库操作函数
+# 数据库操作函数（兼容两种数据库语法）
+import os
+
+# 检查环境并设置占位符
+is_render_env = os.environ.get('RENDER')
+placeholder = "%s" if is_render_env else "?"
+
 def get_user_by_session_token(session_token: str) -> Optional[Dict[str, Any]]:
     """根据session_token获取用户"""
-    query = "SELECT * FROM users WHERE session_token = ? AND is_active = TRUE"
+    query = f"SELECT * FROM users WHERE session_token = {placeholder} AND is_active = TRUE"
     result = db.execute_query(query, (session_token,))
     return result[0] if result else None
 
 def get_user_by_nickname(nickname: str) -> Optional[Dict[str, Any]]:
     """根据昵称获取用户"""
-    query = "SELECT * FROM users WHERE nickname = ? AND is_active = TRUE"
+    query = f"SELECT * FROM users WHERE nickname = {placeholder} AND is_active = TRUE"
     result = db.execute_query(query, (nickname,))
     return result[0] if result else None
 
@@ -165,9 +171,9 @@ def create_user(nickname: str, invite_code: str) -> Dict[str, Any]:
     user_id = str(uuid.uuid4())
     session_token = str(uuid.uuid4())
     
-    query = """
+    query = f"""
     INSERT INTO users (user_id, nickname, invite_code, session_token, chips)
-    VALUES (?, ?, ?, ?, 1000)
+    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, 1000)
     """
     db.execute_update(query, (user_id, nickname, invite_code, session_token))
     
@@ -181,7 +187,7 @@ def create_user(nickname: str, invite_code: str) -> Dict[str, Any]:
 
 def update_user_session_token(user_id: str, session_token: str):
     """更新用户session_token"""
-    query = "UPDATE users SET session_token = ?, last_login = CURRENT_TIMESTAMP WHERE user_id = ?"
+    query = f"UPDATE users SET session_token = {placeholder}, last_login = CURRENT_TIMESTAMP WHERE user_id = {placeholder}"
     db.execute_update(query, (session_token, user_id))
 
 def create_room(room_name: str, creator_id: str, max_players: int = 6, min_bet: int = 5) -> Dict[str, Any]:
@@ -189,9 +195,9 @@ def create_room(room_name: str, creator_id: str, max_players: int = 6, min_bet: 
     import uuid
     room_id = str(uuid.uuid4())
     
-    query = """
+    query = f"""
     INSERT INTO rooms (room_id, room_name, creator_id, max_players, min_bet)
-    VALUES (?, ?, ?, ?, ?)
+    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
     """
     db.execute_update(query, (room_id, room_name, creator_id, max_players, min_bet))
     
@@ -215,11 +221,11 @@ def get_all_rooms() -> List[Dict[str, Any]]:
 
 def get_room_by_id(room_id: str) -> Optional[Dict[str, Any]]:
     """根据房间ID获取房间"""
-    query = "SELECT * FROM rooms WHERE room_id = ?"
+    query = f"SELECT * FROM rooms WHERE room_id = {placeholder}"
     result = db.execute_query(query, (room_id,))
     return result[0] if result else None
 
 def update_room_status(room_id: str, status: str):
     """更新房间状态"""
-    query = "UPDATE rooms SET status = ? WHERE room_id = ?"
+    query = f"UPDATE rooms SET status = {placeholder} WHERE room_id = {placeholder}"
     db.execute_update(query, (status, room_id))
